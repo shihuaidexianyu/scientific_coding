@@ -1,0 +1,33 @@
+name = "ProcessedDataset"
+version = 1
+description = "One baseline-corrected signal tensor per retained trial."
+
+[data]
+path = "signals.npy"
+representation = "baseline_corrected_signal"
+dimensions = ["trial", "channel", "time"]
+dtype = "float32"
+unit = "microvolt"
+missing_value = "not_allowed"
+
+[coordinates]
+channel_frame = "acquisition_channel_order"
+sampling_rate_hz = 1000
+time_origin = "stimulus_onset"
+start_ms = -200
+end_ms = 800
+interval = "left_closed_right_open"
+
+[sample]
+identity = "trial"
+id_column = "sample_id"
+ordering = "sample_id_ascending"
+population = "trials passing the declared preprocessing exclusions"
+
+[preprocessing]
+summary = "Baseline mean from -200 ms to 0 ms is subtracted per trial and channel."
+exclusion_ledger = "excluded_samples.parquet"
+
+[compatibility]
+consumers_require_exact_version = true
+

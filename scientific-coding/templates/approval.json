@@ -1,0 +1,8 @@
+{
+  "status": "approved",
+  "artifact_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "manifest_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "reviewed_by": "researcher_id",
+  "reviewed_at_utc": "2026-09-03T12:30:00Z",
+  "review_note": "Preview and exclusion ledger reviewed against the study protocol."
+}

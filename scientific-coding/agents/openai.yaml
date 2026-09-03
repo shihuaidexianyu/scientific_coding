@@ -1,0 +1,7 @@
+interface:
+  display_name: "Scientific Coding"
+  short_description: "Build auditable, stage-driven scientific pipelines"
+  default_prompt: "Use $scientific-coding to implement this scientific pipeline task with explicit stages, artifacts, and a scientific diff."
+policy:
+  allow_implicit_invocation: true
+

@@ -1,0 +1,19 @@
+name = "raw_main_analysis"
+run_root = "runs/raw_main_analysis"
+
+[[stage]]
+name = "preprocess_raw"
+script = "stages/preprocess_raw.py"
+config = "configs/preprocess_raw.toml"
+input_contract = "RawDatasetV1"
+output_contract = "ProcessedDatasetV1"
+requires_approval = true
+
+[[stage]]
+name = "main_analysis"
+script = "stages/main_analysis.py"
+config = "configs/main_analysis.toml"
+input_contract = "ProcessedDatasetV1"
+output_contract = "AnalysisResultV1"
+requires_approval = true
+

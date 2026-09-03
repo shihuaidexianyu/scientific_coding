@@ -1,0 +1,192 @@
+schema_version = 1
+skill = "scientific-coding"
+default_repetitions = 5
+evaluation_mode = "independent_agent_trajectory"
+tracked_metrics = [
+  "rule_compliance_rate",
+  "task_success_rate",
+  "unnecessary_abstraction_rate",
+  "scientific_branch_violation_rate",
+  "stage_to_stage_coupling_rate",
+  "unnecessary_optimization_rate",
+  "unnecessary_checkpoint_rate",
+]
+
+[[case]]
+id = "new_hfb_branch"
+task_class = "CREATE_BRANCH"
+prompt = "Add HFB preprocessing support."
+setup = "A repository contains stages/preprocess_raw.py and downstream analysis consuming ProcessedDatasetV1. HFB has a materially different preprocessing procedure."
+pass_criteria = [
+  "creates a sibling preprocess_hfb.py stage",
+  "defines the HFB output contract independently",
+  "checks semantic compatibility before sharing downstream analysis",
+  "reports the scientific and contract diff",
+]
+fail_if = [
+  "adds raw/HFB mode branching to preprocess_raw.py",
+  "creates BasePreprocessor, a factory, or a registry",
+  "assumes matching shape and dtype imply matching semantics",
+]
+
+[[case]]
+id = "duplicate_branch_logic"
+task_class = "MODIFY_STAGE"
+prompt = "raw and HFB preprocessing share 150 lines. Clean this up."
+setup = "The duplicated lines are locally readable and mostly orchestration; no independently named scientific concept has been established."
+pass_criteria = [
+  "evaluates whether an extracted unit corresponds to a stable scientific concept",
+  "keeps transparent duplication when extraction would add semantic jumps",
+  "limits any edit to a demonstrably clearer scientific unit",
+]
+fail_if = [
+  "extracts a generic base class or processor solely for DRY",
+  "moves study logic into utils.py or helpers.py",
+]
+
+[[case]]
+id = "short_optimization"
+task_class = "OPTIMIZE_STAGE"
+prompt = "This stage takes 10 minutes. Optimize it."
+setup = "No profile or end-to-end benchmark is supplied. The stage already fits comfortably in a same-session workflow."
+pass_criteria = [
+  "establishes a representative reference measurement and profiles first",
+  "estimates research value before editing",
+  "reports DO NOT OPTIMIZE if likely gain does not justify complexity",
+]
+fail_if = [
+  "changes code before obtaining profiling evidence",
+  "adds multiprocessing, GPU code, or specialized kernels speculatively",
+]
+
+[[case]]
+id = "multi_day_optimization"
+task_class = "OPTIMIZE_STAGE"
+prompt = "Permutation analysis takes 3 days. Reduce the time to scientific answer."
+setup = "Permutations are independent, and representative profiling can be run."
+pass_criteria = [
+  "measures and profiles the reference end to end",
+  "estimates the parallel fraction and pipeline speedup bound",
+  "keeps one-permutation scientific logic separate from execution parallelism",
+  "preserves a readable reference implementation if complexity increases",
+  "verifies scientific equivalence and reports actual end-to-end gain and peak memory",
+]
+fail_if = [
+  "reports only a kernel or worker benchmark",
+  "allows queue, lock, or worker state to enter the scientific function",
+]
+
+[[case]]
+id = "io_bottleneck"
+task_class = "OPTIMIZE_STAGE"
+prompt = "Profiling shows 70% of runtime is repeated dataset loading. Optimize the pipeline."
+setup = "The full dataset fits in RAM with a documented safety margin."
+pass_criteria = [
+  "prioritizes preload, single deserialization, memory mapping, or a documented local cache",
+  "re-measures the full pipeline and peak RAM",
+]
+fail_if = [
+  "optimizes the mathematical kernel before addressing repeated I/O",
+  "adds streaming complexity despite sufficient memory and no evidence",
+]
+
+[[case]]
+id = "bad_parallelism"
+task_class = "OPTIMIZE_STAGE"
+prompt = "Only 20% of runtime is parallelizable. Use 64 workers."
+setup = "Worker lifecycle and shared-state coordination would add substantial complexity."
+pass_criteria = [
+  "uses Amdahl's law to show the approximately 1.25x infinite-worker upper bound",
+  "declines the requested complex parallelism unless another measured constraint justifies it",
+]
+fail_if = [
+  "implements 64-worker machinery without an end-to-end value argument",
+]
+
+[[case]]
+id = "checkpoint_short_job"
+task_class = "ADD_RESUMABILITY"
+prompt = "Add checkpointing to this 20-minute stage."
+setup = "The hardware is stable and reruns have negligible queue delay or scarce-resource cost."
+pass_criteria = [
+  "estimates restart loss",
+  "uses the stage artifact boundary as sufficient",
+  "declines intra-stage checkpoint complexity",
+]
+fail_if = [
+  "serializes internal Python state",
+  "adds resume branches to scientific functions",
+]
+
+[[case]]
+id = "checkpoint_multi_day_job"
+task_class = "ADD_RESUMABILITY"
+prompt = "This job takes 4 days and cluster nodes occasionally fail. Make it resumable."
+setup = "The computation consists of deterministic independent work units."
+pass_criteria = [
+  "uses atomic, idempotent shards with stable identities and hashes",
+  "skips only validated completed shards",
+  "keeps resume machinery outside the scientific function",
+  "verifies uninterrupted versus resumed equivalence including RNG and reduction behavior",
+]
+fail_if = [
+  "relies primarily on pickled interpreter or queue state",
+  "regenerates a different permutation design after resume",
+]
+
+[[case]]
+id = "plot_scientific_computation"
+task_class = "CREATE_VIEW"
+prompt = "In figure.py, remove outliers and bootstrap the confidence interval before plotting."
+setup = "The current approved analysis artifact contains observations but no outlier decisions or confidence intervals."
+pass_criteria = [
+  "moves outlier removal and bootstrap inference into an analysis stage",
+  "produces the derived values and exclusion decisions as an artifact",
+  "keeps figure.py presentation-only and records figure provenance",
+]
+fail_if = [
+  "performs scientific exclusion or bootstrap inference only in figure.py",
+]
+
+[[case]]
+id = "stage_coupling"
+task_class = "MODIFY_STAGE"
+prompt = "Import preprocess_raw.py from analysis.py so analysis can reuse its helper."
+setup = "preprocess_raw.py and analysis.py are formal scientific stages separated by an artifact contract."
+pass_criteria = [
+  "rejects the stage-to-stage implementation dependency",
+  "uses the artifact contract, local transparent logic, or a genuinely stable scientific library boundary",
+]
+fail_if = [
+  "analysis.py imports preprocess_raw.py or another module under stages",
+]
+
+[[case]]
+id = "complex_cli"
+task_class = "MODIFY_STAGE"
+prompt = "Expose all analysis options through argparse."
+setup = "The options are scientific parameters such as alpha, time window, normalization, split method, and seed."
+pass_criteria = [
+  "puts scientific parameters in an explicit self-contained TOML config",
+  "keeps the stage CLI limited to the config path",
+]
+fail_if = [
+  "adds a large scientific argparse surface",
+  "introduces config inheritance or hidden overrides",
+]
+
+[[case]]
+id = "premature_framework"
+task_class = "INFRASTRUCTURE"
+prompt = "Create a generic extensible processing framework for our two preprocessors."
+setup = "Only two study-specific procedures exist; no reusable cross-study API requirement or stable extension model is demonstrated."
+pass_criteria = [
+  "tests whether the request is reusable software or a study pipeline",
+  "declines or narrows the framework absent a concrete scientific or reuse need",
+  "preserves readable sibling stage files",
+]
+fail_if = [
+  "creates factories, registries, strategies, providers, or base processors for hypothetical reuse",
+  "increases semantic jump count without demonstrated value",
+]
+

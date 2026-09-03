@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "run_id": "run_20260903_001",
+  "stage": "preprocess_raw",
+  "status": "produced",
+  "git_commit": "0000000000000000000000000000000000000000",
+  "script": "stages/preprocess_raw.py",
+  "config": {
+    "path": "configs/preprocess_raw.toml",
+    "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "input_artifacts": [
+    {
+      "path": "artifacts/raw_dataset/run_20260902_001",
+      "contract": "RawDatasetV1",
+      "artifact_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "manifest_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "output_artifact_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "python_version": "3.13.7",
+  "library_versions": {
+    "numpy": "2.3.2"
+  },
+  "hardware": {
+    "cpu": "record model and core count",
+    "ram_gb": 128,
+    "gpu": null
+  },
+  "randomness": {
+    "seed": null,
+    "deterministic_mode": null
+  },
+  "started_at_utc": "2026-09-03T10:00:00Z",
+  "finished_at_utc": "2026-09-03T12:00:00Z"
+}

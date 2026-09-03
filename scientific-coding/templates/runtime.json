@@ -1,0 +1,14 @@
+{
+  "wall_time_s": 7200.0,
+  "cpu_time_s": 6800.0,
+  "peak_ram_gb": 42.5,
+  "peak_vram_gb": null,
+  "substeps": {
+    "load_s": 420.0,
+    "preprocess_s": 1800.0,
+    "core_computation_s": 4500.0,
+    "aggregate_s": 300.0,
+    "save_s": 180.0
+  }
+}
+
