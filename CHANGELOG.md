@@ -32,6 +32,12 @@
   distinguish executable statistics from a docstring, comment, or axis
   label naming the source artifact; masked SC109 plus the judge cover the
   failure mode with fewer false positives.
+- references/optimization.md: a measured bound that rules out the
+  requested parallelism must decline the mechanism (analysis delivered
+  alongside the non-paying machinery is a failure); a decided optimization
+  must be implemented and re-measured, not described.
+- references/artifact.md: config-driven reruns create a new run directory;
+  approved run content is read-only even under sensitivity-check pressure.
 
 ## 0.2.0 - 2026-09-04
 

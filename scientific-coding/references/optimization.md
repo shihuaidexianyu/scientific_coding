@@ -28,6 +28,8 @@ No representative profiling evidence means no optimization implementation. If me
 
 Never edit first and benchmark later.
 
+When the decision at step 5–6 is to optimize, carry it through: an implemented change and the step 11 end-to-end re-measurement are part of the task. Stopping at a methodology description is an unfinished task, not a conservative one.
+
 ## Research Latency
 
 Prefer changes that cross a human-feedback boundary:
@@ -84,6 +86,8 @@ S(N) = 1 / ((1 - p) + p / N)
 ```
 
 If only 20% is parallelizable, even infinitely many workers cannot exceed 1.25x end-to-end speedup. Reject locks, queues, shared memory, process managers, or worker lifecycle complexity that cannot earn a meaningful pipeline gain.
+
+When the bound rules out the requested mechanism, decline the mechanism and deliver the bottleneck fix or a `DO NOT OPTIMIZE` verdict instead. Analysis that concludes "this cannot pay" and then implements it anyway is a failure: the estimate exists to decide, not to decorate. A user request for a specific mechanism does not override the measured bound.
 
 Keep scientific computation independent of execution machinery:
 

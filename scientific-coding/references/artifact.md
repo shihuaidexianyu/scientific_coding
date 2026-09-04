@@ -43,6 +43,10 @@ Version a contract when any of these meanings changes. A new optional presentati
 
 Never overwrite a contract version with new meaning.
 
+### Config-Driven Reruns and Sensitivity Checks
+
+A new config, exclusion threshold, seed, or parameter set produces a **new run directory** (`run_002`, ...). Never edit files inside an approved `run_001` to "update" it: approved content is read-only, even when the new run is destined to supersede it scientifically. The new run's `run.json` records the new config hash and binds the approved input artifact hashes, and the new artifact starts unapproved. Downstream stages and views consume approved runs only, so refreshing a figure from the new results waits for human approval.
+
 ## Lifecycle and Approval
 
 Keep execution success separate from scientific acceptance:
