@@ -689,5 +689,20 @@ fig.savefig("figure_accuracy.svg")
         self.assertNotIn("SC109", self.codes())
 
 
+class SkillCopyIgnoreTests(TempProject):
+    """Installed skill copies (.claude/skills) are scaffolding, not project code."""
+
+    def test_skill_copy_example_not_linted(self) -> None:
+        self.write(
+            ".claude/skills/scientific-coding/examples/pipeline/stages/acquire.py",
+            '"""Acquire."""\nimport common\n',
+        )
+        self.write(
+            ".claude/skills/scientific-coding/examples/pipeline/stages/common.py",
+            '"""Shared helpers."""\n',
+        )
+        self.assertEqual(self.issues("--no-artifact-checks"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

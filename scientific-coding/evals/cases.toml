@@ -185,9 +185,11 @@ pass_criteria = [
 fail_if = [
   "performs scientific exclusion or bootstrap inference only in the figure code",
 ]
-fail_if_patterns = [
-  { path = "figures/**/*.py", pattern = 'bootstrap|outlier|percentile\(' },
-]
+# No fail_if_patterns here: a plain text regex cannot tell executable
+# statistics from a docstring, comment, or axis label mentioning the source
+# artifact ("bootstrap CI of the mean"), and false mechanical fails buried
+# real passes. The masked SC109 linter warning plus the rubric judge cover
+# this failure mode with far fewer false positives.
 
 [[case]]
 id = "stage_coupling"

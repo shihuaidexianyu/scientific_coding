@@ -21,6 +21,18 @@
   where the work is requested, including explicit user requests to compute
   statistics inside the figure file.
 
+### Fixed
+- The linter no longer lints installed skill copies (`.claude/skills`,
+  `.agents/skills`); their shipped example is not project code and its
+  stage imports produced phantom SC001 noise in every eval workdir.
+- Eval runs whose agent call failed at the API level (provider quota/429)
+  are marked invalid (`pass=None`) instead of graded as real failures, and
+  the rubric judge skips them; summary tables show an invalid count.
+- The plot case drops its `fail_if` text pattern: plain regex could not
+  distinguish executable statistics from a docstring, comment, or axis
+  label naming the source artifact; masked SC109 plus the judge cover the
+  failure mode with fewer false positives.
+
 ## 0.2.0 - 2026-09-04
 
 ### Added

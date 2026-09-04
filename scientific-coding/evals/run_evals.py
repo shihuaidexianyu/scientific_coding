@@ -232,15 +232,29 @@ def run_single(
         violations = graders.check_patterns(workdir, case.get("fail_if_patterns", []))
 
     lint_info = graders.linter_summary(lint_output)
+    # A run whose agent call failed at the API level (quota exhaustion,
+    # provider 429/5xx) never executed the model; grading it as a real
+    # failure pollutes every rate. Mark it invalid (pass=None) and skip
+    # the rubric judge entirely.
+    api_error = (
+        backend != "mock"
+        and (
+            returncode != 0
+            or '"is_error":true' in trajectory
+            or '"is_error": true' in trajectory
+            or "当前已达到" in trajectory  # provider quota messages (e.g. MiniMax)
+        )
+    )
     verdict: dict[str, Any] = {
         "deterministic_violations": violations,
         "linter": lint_info,
         "agent_returncode": returncode,
         "elapsed_s": round(elapsed, 1),
         "skill_triggered": skill_triggered(trajectory),
+        "api_error": api_error,
     }
 
-    if use_judge and backend != "mock":
+    if use_judge and backend != "mock" and not api_error:
         env = dict(os.environ)
         if backend == "codex":
             # judge outside the fixture: use the ambient CODEX_HOME
@@ -257,7 +271,9 @@ def run_single(
 
     deterministic_pass = not violations
     judge_pass = verdict.get("judge", {}).get("pass")
-    verdict["pass"] = deterministic_pass and (judge_pass in (True, None))
+    verdict["pass"] = (
+        None if api_error else deterministic_pass and (judge_pass in (True, None))
+    )
     (run_dir / "verdict.json").write_text(
         json.dumps(verdict, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -270,19 +286,20 @@ def summarize(records: list[dict[str, Any]], results_dir: Path) -> None:
         by_case.setdefault(record["case"], []).append(record)
 
     lines = ["# Evaluation summary", ""]
-    lines.append("| case | mode | lang | runs | pass rate | linter errors | triggered |")
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append("| case | mode | lang | runs | pass rate | invalid | linter errors | triggered |")
+    lines.append("|---|---|---|---|---|---|---|---|")
     groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for record in records:
         key = (record["case"], record["mode"], record["language"])
         groups.setdefault(key, []).append(record)
     for (case_id, mode, language), group in sorted(groups.items()):
         passes = sum(1 for r in group if r["verdict"].get("pass"))
+        invalid = sum(1 for r in group if r["verdict"].get("api_error"))
         errors = sum(r["verdict"]["linter"]["errors"] for r in group)
         triggered = sum(1 for r in group if r["verdict"].get("skill_triggered"))
         lines.append(
             f"| {case_id} | {mode} | {language} | {len(group)} "
-            f"| {passes}/{len(group)} | {errors} | {triggered}/{len(group)} |"
+            f"| {passes}/{len(group)} | {invalid} | {errors} | {triggered}/{len(group)} |"
         )
 
     summary = {

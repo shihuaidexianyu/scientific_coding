@@ -374,7 +374,17 @@ def is_ignored(path: Path, root: Path) -> bool:
         parts = path.relative_to(root).parts
     except ValueError:
         parts = path.parts
-    return any(part in IGNORED_DIRECTORIES for part in parts)
+    if any(part in IGNORED_DIRECTORIES for part in parts):
+        return True
+    # Installed skill copies (.claude/skills, .agents/skills) are agent
+    # scaffolding, not project code: they ship their own worked example,
+    # which must not be linted as part of the host project.
+    return any(
+        parts[i] in {".claude", ".agents"}
+        and i + 1 < len(parts)
+        and parts[i + 1] == "skills"
+        for i in range(len(parts))
+    )
 
 
 def read_utf8(path: Path) -> str:

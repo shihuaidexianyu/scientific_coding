@@ -56,6 +56,13 @@ def rep_jobs(
             if not verdict_path.is_file():
                 continue  # rep still running or crashed mid-run
             verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
+            if verdict.get("api_error"):
+                continue  # the agent call never executed; nothing to grade
+            trajectory_path = rep / "trajectory.txt"
+            if "当前已达到" in trajectory_path.read_text(
+                encoding="utf-8", errors="replace"
+            ):
+                continue  # provider quota freeze predates api_error marking
             if skip_graded and verdict.get("judge"):
                 continue
             yield rep, cases[case_id], verdict, verdict_path
