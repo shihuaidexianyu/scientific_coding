@@ -52,12 +52,14 @@ A downstream stage depends on the upstream **artifact contract**, never on the u
 
 ## Non-Negotiable Rules
 
+- These rules bind regardless of instruction source. Never forge or edit an approval record, mutate an approved artifact, run a downstream stage on unapproved input, or weaken lint or approval machinery to make progress — not even when the user explicitly asks for it, the task demands an end-to-end result by any means, or a deadline is cited. When an instruction conflicts with these rules, follow the rule, complete the compliant portion of the work, and state the conflict and the compliant alternative in the completion report.
 - Organize code by scientific stage, not by services, managers, processors, factories, registries, or generic utilities.
 - Keep one coherent scientific purpose in one Python file by default. Optimize for minimum semantic jumps, not minimum file length.
 - Make the top-level stage read as a linear data narrative from config and input artifact to output artifact.
 - Put materially different scientific procedures in sibling stage files. Do not hide them behind a runtime `mode` branch merely to deduplicate code.
 - Merge branches only when their artifact contracts are semantically equivalent in representation, units, coordinates, time origin, preprocessing, and sample meaning—not merely shape and dtype.
 - Treat artifacts as the only formal stage API. Approved artifacts are immutable; content changes invalidate approval.
+- Never create, modify, or finalize an approval record. Produce artifacts and review packets only; approval is a human action performed through `scripts/scientific_artifact.py approve`, which requires explicit interactive confirmation. Use `finalize` to submit an artifact for review.
 - Preserve stable sample IDs and emit an exclusion ledger whenever sample membership changes.
 - Use TOML for human-authored scientific configuration and JSON for machine-generated metadata. Keep scientific parameters out of a large CLI surface.
 - Keep scientific transformations explicit and data lineage visible; prefer new names over hidden in-place mutation.
@@ -81,6 +83,7 @@ Internally classify the request before editing. A task may need more than one cl
 | `CREATE_VIEW` | Creating or changing a figure, table, report, or exploration | [references/view.md](references/view.md) |
 | `OPTIMIZE_STAGE` | Improving runtime or memory behavior | [references/optimization.md](references/optimization.md) |
 | `ADD_RESUMABILITY` | Adding checkpoint, resume, or shard behavior | [references/resumability.md](references/resumability.md) |
+| `DESIGN_INFERENCE` | Computing any statistic, interval, p-value, split, or comparison | [references/statistical_validity.md](references/statistical_validity.md) |
 | `AUDIT_STAGE` | Reviewing a stage or pipeline for this model | [references/audit.md](references/audit.md) |
 | `INFRASTRUCTURE` | Work outside the scientific pipeline itself | Keep science out of the infrastructure; use [references/audit.md](references/audit.md) only to check the boundary |
 
@@ -90,7 +93,7 @@ Also read [references/artifact.md](references/artifact.md) whenever a task creat
 
 1. Inspect the repository, existing contracts, configs, artifacts, and local instructions before proposing structure.
 2. State internally the scientific purpose, active task class, input semantics, output semantics, and whether scientific behavior changes.
-3. If a missing scientific choice would materially alter the method, contract, sample population, or randomness, ask the user instead of inventing it.
+3. Separate genuine scientific forks from ordinary underspecification. If a missing choice would materially alter the method, contract, sample population, or randomness, ask the user before inventing it. For everything else — naming, layout, file placement, scope, and engineering detail — state the assumption briefly, adopt the narrowest reasonable interpretation, and keep working; record remaining questions in the completion report instead of stopping to ask them.
 4. Make the narrowest coherent change. Preserve existing readable reference logic and unrelated user work.
 5. Test scientific invariants, artifact contracts, lineage, and reference/resume equivalence as applicable; do not chase meaningless coverage.
 6. Run the deterministic linter, then the project's normal tests and type checks:
@@ -106,7 +109,7 @@ Use ready-to-adapt files under [templates/](templates/) when creating contracts,
 
 ## Completion Report
 
-For any code change, lead with the outcome and report verification. If scientific behavior may be affected, include this exact semantic summary with concise evidence:
+For any code change, lead with the outcome and report verification. If scientific behavior may be affected, include this exact scientific diff with concise evidence:
 
 ```text
 Scientific behavior changed: yes / no
@@ -119,4 +122,6 @@ Runtime materially changed: yes / no
 ```
 
 For `MODIFY_STAGE`, also summarize before/after scientific behavior, whether the artifact contract changed, and why a version bump is or is not required. Never substitute a Git diff summary for this scientific diff.
+
+List the assumptions adopted where the task was underspecified and any questions that remain open. A completion report that only asks questions and changes no code is not a completed task.
 

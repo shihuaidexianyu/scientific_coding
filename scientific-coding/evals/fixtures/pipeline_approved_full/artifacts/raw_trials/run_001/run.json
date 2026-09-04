@@ -1,0 +1,14 @@
+{
+  "command": "python stages/acquire_data.py",
+  "config": {
+    "path": "configs/acquire_data.toml",
+    "sha256": "7b3148363dc5403d7fe6d4894cf7093d7bd11df8c7ab21e53f1a944a0860ff46"
+  },
+  "code": {
+    "path": "stages/acquire_data.py",
+    "sha256": "78edf604bc59ff630479ca0c0d2209d61469c84b2c7237c7bd260ab2a01817d0"
+  },
+  "input_artifacts": [],
+  "started_at_utc": "2026-09-04T02:02:56Z",
+  "output_artifact_hash": "sha256:20754c64d6160558e0ef0bd01fe5c863fc85ee12ee92bca35f32a24ee06a06d5"
+}

@@ -1,5 +1,7 @@
 # Scientific Pipeline Audit
 
+Contents: Audit Objective · Audit Procedure · Audit Checklist · Deterministic Linter · Scientific Diff · Definition of Done
+
 Read this reference for `AUDIT_STAGE`, completion review, or checking the boundary around `INFRASTRUCTURE` work.
 
 ## Audit Objective
@@ -50,34 +52,43 @@ Run:
 python <skill-dir>/scripts/scientific_code_lint.py <project-root> --changed-only
 ```
 
-Use `--strict-warnings` in CI once existing warnings have been triaged. Use `--format json` for machine-readable output. Static AST checks cannot prove semantic correctness; combine them with contract and scientific-invariant tests.
+Use `--base-ref origin/main` in CI to diff against the merge base (a clean PR checkout has no working-tree changes, so plain `--changed-only` would check nothing). Use `--strict-warnings` in CI once existing warnings have been triaged. Use `--format json` for machine-readable output. Static AST checks cannot prove semantic correctness; combine them with contract and scientific-invariant tests.
+
+Which files count as stages or views is decided by, in order: an in-file marker (`# scientific-code: stage` / `view`), the project's `scientific-code.toml` scope roots (see [the template](../templates/scientific-code.toml)), then naming conventions (`stages/` directories, common stage/view file stems). Infrastructure roots declared in the config are exempt from the naming-discipline heuristics. Declare the scope explicitly whenever the project layout does not match the conventions. When the lint root has no `scientific-code.toml` — or one with an empty `[scope]` — the nearest nested project config is used instead (monorepo layout), and its roots apply relative to that project's directory, not to the lint root.
+
+Artifact integrity checks run in two modes. The default metadata mode validates schema, paths, derived hashes, and approval binding without reading payload content, so lint stays cheap on large data. `--full-artifact-checks` additionally re-hashes approved artifact payloads and recorded input artifact payloads; use it for release verification or scheduled integrity audits, not on every lint run.
 
 Hard errors:
 
 | Code | Meaning |
 |---|---|
 | `SC000` | a Python source file cannot be read or parsed, so checks cannot run reliably |
-| `SC001` | stage imports another stage implementation |
-| `SC002` | stage exposes a large scientific CLI surface |
+| `SC001` | stage imports another stage implementation, directly or through a chain of local modules |
+| `SC002` | stage exposes scientific parameters (e.g. `--seed`, `--window-ms`) as CLI arguments |
 | `SC003` | approved artifact hash does not match its manifest/content |
 | `SC004` | an artifact candidate is missing or has an unreadable manifest |
-| `SC005` | a recorded input artifact is not approved or hash-compatible |
-| `SC006` | a view imports a scientific stage implementation |
-| `SC007` | tracked artifact content changed after approval |
+| `SC005` | a recorded input artifact is not approved or hash-compatible; in `--full-artifact-checks` mode also fires when the input payload no longer matches its approved manifest |
+| `SC006` | a view imports a scientific stage implementation, directly or transitively |
+| `SC007` | tracked artifact content changed after approval (payload comparison requires `--full-artifact-checks`) |
 | `SC008` | a formal non-acquisition stage performs a known network call |
+
+`SC002` also fires as a **warning** when a stage defines more than two CLI arguments whose names do not look scientific; only the scientific-parameter form is a hard error.
 
 Heuristic warnings:
 
 | Code | Meaning |
 |---|---|
 | `SC101` | scientific branch may be hidden behind config `if/else` |
-| `SC102` | factory/registry/manager-style abstraction appeared |
-| `SC103` | generic `utils.py`/`helpers.py`-style module appeared |
+| `SC102` | factory/registry/manager-style abstraction appeared in pipeline scope |
+| `SC103` | generic `utils.py`/`helpers.py`-style module appeared in pipeline scope |
 | `SC104` | checkpoint or resume machinery appeared |
-| `SC105` | optimized/specialized implementation lacks an optimization report |
+| `SC105` | optimized/specialized implementation lacks a valid optimization report (missing, placeholder text, or `pipeline_speedup` inconsistent with the recorded end-to-end times) |
 | `SC106` | broad exception fallback may hide failure |
 | `SC107` | a scientific function may mutate an input parameter |
-| `SC108` | a likely scientific function lacks a semantic contract docstring |
+| `SC108` | a likely scientific function lacks a semantic contract docstring (NumPy, Google, Sphinx, and Chinese conventions are accepted; a complete module-level contract waives per-function checks) |
+| `SC109` | a view appears to perform scientific computation (bootstrap, outlier removal, percentile/interval statistics, normalization, fitting); comments, docstrings, and labels are masked, only executable code fires |
+
+`SC102`/`SC103` apply only inside pipeline scope (stage/view files); infrastructure code keeps its own conventions, per the scope gate.
 
 A warning may be suppressed at file scope only with a concrete justification:
 

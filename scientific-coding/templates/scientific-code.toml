@@ -1,0 +1,12 @@
+# Project scope for scientific-code lint
+#
+# Place at the project root. Files under stage/view roots are always treated
+# as pipeline code; files under infrastructure roots are exempt from
+# naming-discipline heuristics (SC102/SC103), matching the scope gate.
+# Paths are relative to this file, forward slashes.
+
+[scope]
+stage_roots = ["stages", "analysis"]
+view_roots = ["figures", "views"]
+artifact_roots = ["artifacts"]
+infrastructure_roots = ["src", "infra"]

@@ -1,0 +1,5 @@
+{
+  "source": "synthetic seeded generation (stand-in for instrument export)",
+  "generation_model": "per trial: multiplier ~ {0.7:0.1, 1.0:0.8, 1.3:0.1}, amplitude_uv ~ normal(condition_mean, condition_std * multiplier)",
+  "generated_at_utc": "2026-09-04T02:02:56Z"
+}

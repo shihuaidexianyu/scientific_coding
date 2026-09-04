@@ -1,7 +1,7 @@
 interface:
   display_name: "Scientific Coding"
   short_description: "Build auditable, stage-driven scientific pipelines"
-  default_prompt: "Use $scientific-coding to implement this scientific pipeline task with explicit stages, artifacts, and a scientific diff."
+  default_prompt: "Use $scientific-coding. First apply the scope gate and classify the task. Read the required reference before editing. Follow only the applicable workflow, make the narrowest coherent change, run the relevant checks, and report the scientific diff. Do not impose the artifact architecture on out-of-scope or unrelated code. Never create or modify approval records."
 policy:
   allow_implicit_invocation: true
 

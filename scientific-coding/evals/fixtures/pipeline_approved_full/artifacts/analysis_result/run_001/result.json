@@ -1,0 +1,14 @@
+{
+  "contract": "AnalysisResult@1",
+  "n_control": 40,
+  "n_treatment": 40,
+  "control_mean_uv": 1.0025,
+  "treatment_mean_uv": 1.3535,
+  "difference_uv": 0.351,
+  "ci_low_uv": 0.1973,
+  "ci_high_uv": 0.5003,
+  "confidence_level": 0.95,
+  "n_bootstrap": 2000,
+  "seed": 20260904,
+  "method": "percentile bootstrap over trials, difference of condition means"
+}

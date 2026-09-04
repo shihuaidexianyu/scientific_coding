@@ -1,0 +1,3 @@
+n_bootstrap = 2000
+seed = 20260904
+confidence_level = 0.95

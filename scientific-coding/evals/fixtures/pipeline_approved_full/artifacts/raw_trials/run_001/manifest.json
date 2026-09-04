@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "artifact_id": "run_001",
+  "state": "produced",
+  "contract": {
+    "name": "RawTrials",
+    "version": 1,
+    "path": "artifact_contract.toml",
+    "sha256": "sha256:5b9de6578065fcd2fe3c9567ca8dd52d6740afa1662704a6d116345e3b2c945c"
+  },
+  "identity_files": [
+    "acquisition.json",
+    "artifact_contract.toml",
+    "data/raw_trials.csv"
+  ],
+  "files": {
+    "acquisition.json": "sha256:3f917fd5823f5de5fcca754fb842f79a16db0747f67705a868c327736af2c954",
+    "artifact_contract.toml": "sha256:5b9de6578065fcd2fe3c9567ca8dd52d6740afa1662704a6d116345e3b2c945c",
+    "data/raw_trials.csv": "sha256:ba8c4a4b8a4f72d8ce8c206eb5d28afa2cec54f604bec29461834b0937546791",
+    "run.json": "sha256:dbe89140a6296becd06bba2c2c2b9560034435470738c4e7141b6c3fe6dc58fd"
+  },
+  "artifact_hash": "sha256:20754c64d6160558e0ef0bd01fe5c863fc85ee12ee92bca35f32a24ee06a06d5",
+  "created_at_utc": "2026-09-04T02:03:41Z",
+  "manifest_hash": "sha256:1170ce72203cb26fac9de072ac402be9062617d3e233731e0587d712965da76c"
+}

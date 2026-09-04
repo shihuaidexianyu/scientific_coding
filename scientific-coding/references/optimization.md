@@ -1,5 +1,7 @@
 # Scientific Pipeline Optimization
 
+Contents: Objective · Required Workflow · Research Latency · Optimization Levels · End-to-End Evidence · Parallelism · Memory and I/O · Scientific Equivalence · Acceptance
+
 Read this reference for `OPTIMIZE_STAGE`.
 
 ## Objective

@@ -42,6 +42,8 @@ It does not participate in the formal stage dataflow and must not produce hidden
 
 When such work is requested inside `figure.py`, add or modify an analysis stage that produces the derived values as an approved artifact, then make the figure consume those values. Do not silently perform the calculation in the view.
 
+This boundary holds regardless of where the work is requested. If the user explicitly asks for outlier removal, intervals, fitting, or normalization "in the figure file", perform the computation in an analysis stage anyway, have the figure read the derived artifact, and say so in the completion report. User instruction never moves scientific computation downstream into a view; the linter's SC109 warning flags common statistical patterns found in view files.
+
 ## Notebooks
 
 Use notebooks for exploration and temporary visualization. A notebook must not remain the only formal implementation of preprocessing, analysis, or validation. Once an exploratory method becomes part of the study, rewrite it as a readable stage `.py` file and preserve the notebook only as exploration if it remains useful.

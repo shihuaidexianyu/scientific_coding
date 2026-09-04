@@ -1,0 +1,9 @@
+{
+  "run_id": "run_001",
+  "stage": "main_analysis",
+  "status": "produced",
+  "git_commit": "0000000000000000000000000000000000000000",
+  "script": "stages/main_analysis.py",
+  "input_artifacts": [],
+  "randomness": {"seed": 20260904, "deterministic_mode": true}
+}

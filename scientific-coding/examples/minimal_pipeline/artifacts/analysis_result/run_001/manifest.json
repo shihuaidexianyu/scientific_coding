@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "artifact_id": "run_001",
+  "state": "produced",
+  "contract": {
+    "name": "AnalysisResult",
+    "version": 1,
+    "path": "artifact_contract.toml",
+    "sha256": "sha256:21b57ab60b943231426ad21125c710c6b9f77e5794eed5dec58e7397bd1e237b"
+  },
+  "identity_files": [
+    "artifact_contract.toml",
+    "result.json",
+    "summary.md"
+  ],
+  "files": {
+    "artifact_contract.toml": "sha256:21b57ab60b943231426ad21125c710c6b9f77e5794eed5dec58e7397bd1e237b",
+    "result.json": "sha256:2a9d822eb385b7a81a132fd9e61f70515a4d98ea69be33b8e0418aada598e9cf",
+    "run.json": "sha256:73e7016d46d61e169af1ebbfc2e129cc452440ecb614c49ab01bf8a0c79a9951",
+    "summary.md": "sha256:ba177ed1b1dd4be5ab1726ca05527937a2701389c9c3e60759488fd1f20bc3e7"
+  },
+  "artifact_hash": "sha256:1e532484c83dd9e387cfcbdcb0481dbca82e95fa72aec60c337fd04f350d6991",
+  "created_at_utc": "2026-09-04T02:04:43Z",
+  "manifest_hash": "sha256:5ff4d4f28073b532bcbbdec06cd9e51a9afd1c7adc4b1f65a9a5f6bc07e1720a"
+}

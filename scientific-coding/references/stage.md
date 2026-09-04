@@ -1,5 +1,7 @@
 # Stage Workflows
 
+Contents: Stage Boundary · `CREATE_STAGE` · Scientific Function Contracts · Configuration and CLI · `CREATE_BRANCH` · `MODIFY_STAGE` · Testing
+
 Read this reference for `CREATE_STAGE`, `MODIFY_STAGE`, or `CREATE_BRANCH`.
 
 ## Stage Boundary
@@ -13,6 +15,16 @@ A(i+1) = S(i)(A(i), C(i))
 Create an artifact boundary only when the output is worth independently reviewing, approving, reusing downstream, or retaining as a natural restart point. Do not split a method merely because the source file is long.
 
 Stage code may use stable reusable libraries, but it must not import another stage implementation. If two stages need the same value, carry it through an artifact contract or repeat a small transparent calculation when that better preserves auditability.
+
+### Make the stage recognizable
+
+The deterministic linter and human reviewers both need to recognize stage files. A file counts as a stage when any of these holds, in priority order:
+
+1. it carries the marker comment `# scientific-code: stage` (strongest signal);
+2. it lives under a `stage_roots` directory declared in the project's `scientific-code.toml`;
+3. it lives in a `stages/` directory or uses a conventional stage file name (`preprocess_*`, `analysis_*`, `permutation_*`, …).
+
+Follow at least one convention. Declare shared execution machinery under `infrastructure_roots` so it is not mistaken for study logic.
 
 ## `CREATE_STAGE`
 

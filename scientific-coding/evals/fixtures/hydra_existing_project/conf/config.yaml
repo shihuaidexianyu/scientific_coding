@@ -1,0 +1,12 @@
+# @package _global_
+
+analysis:
+  alpha: 0.05
+  window_ms: [-200, 800]
+  normalization: baseline_ratio
+  split: subject_level
+  seed: 20260904
+
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}

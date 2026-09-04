@@ -1,5 +1,7 @@
 # Artifact Contracts and Lineage
 
+Contents: Artifact as the Formal API · Contract Semantics · Lifecycle and Approval · Stable Sample Identity and Exclusions · No Hidden Inputs · Provenance and Randomness · Atomic Production · Manifest Hash Convention · Orchestration
+
 Read this reference whenever a task creates or changes a stage boundary, artifact contract, sample population, approval state, orchestration link, randomness record, or provenance record.
 
 ## Artifact as the Formal API
@@ -53,6 +55,8 @@ approved  -> superseded
 ```
 
 A successful run produces an artifact; it does not approve it. Formal downstream stages consume approved artifacts only. Bind approval to the artifact hash. If any tracked content changes, hash verification must fail and the approval becomes invalid.
+
+Approval is a human action. An agent must never create or modify an approval record; it submits an artifact for review with `scripts/scientific_artifact.py finalize` (which writes a `pending_review` record) and the human approves with `scripts/scientific_artifact.py approve`, which verifies hashes, requires an interactive terminal, and demands typed confirmation. Integrity (hashes match) is not authenticity (a human reviewed); the approval ceremony exists to keep them distinct.
 
 Review previews help a human inspect an artifact but do not become hidden scientific inputs.
 
@@ -113,6 +117,8 @@ The bundled linter understands this deterministic convention:
 
 Do not include `manifest.json` or `approval.json` in `files`, which would create a hash cycle.
 Compute `artifact_hash` after writing the identity files; write that value into `run.json`; then hash all metadata files, finalize `manifest_hash`, and create the approval record only after human review.
+
+This ordering is subtle. Never re-implement it by hand in stage code: `scripts/scientific_artifact.py finalize` is the reference implementation, and `verify` re-checks it.
 
 ## Orchestration
 

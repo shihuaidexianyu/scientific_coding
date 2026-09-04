@@ -4,6 +4,18 @@
 The checks deliberately separate hard, mechanically testable violations from
 heuristics that require researcher judgment. The script has no third-party
 dependencies and is intended to run before a project's normal tests.
+
+A project may declare directory roles in a root-level scientific-code.toml:
+
+    [scope]
+    stage_roots = ["stages", "analysis"]
+    view_roots = ["figures", "views"]
+    artifact_roots = ["artifacts"]
+    infrastructure_roots = ["src", "infra"]
+
+Files under stage/view roots are always treated as pipeline code; files under
+infrastructure roots are exempt from naming-discipline heuristics, matching
+the scope gate in SKILL.md.
 """
 
 from __future__ import annotations
@@ -11,13 +23,20 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import io
 import json
 import re
 import subprocess
 import sys
+import tokenize
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
+
+try:
+    import tomllib
+except ImportError:  # Python < 3.11: project scope config is unavailable
+    tomllib = None
 
 
 IGNORED_DIRECTORIES = {
@@ -54,6 +73,12 @@ VIEW_STEM = re.compile(r"^(figure|fig|plot|table|report)(?:_|$)")
 SUPPRESSION = re.compile(
     r"^\s*#\s*scientific-code:\s*allow\s+(SC1\d{2})\s*--\s*(\S.*)$",
     re.MULTILINE,
+)
+VIEW_SCIENTIFIC_COMPUTATION = re.compile(
+    r"\b(?:bootstrap\w*|jackknife|permutation[_ ]?test|outlier\w*|percentile|"
+    r"confidence[_ ]interval|confint|normaliz\w+|standardiz\w+|z[_ -]?scores?|"
+    r"p[_ -]?values?|benjamini|bonferroni|false[_ ]discovery|"
+    r"linear_regression|logistic_regression|fit_transform)|\.fit\("
 )
 BRANCH_KEYS = {
     "branch",
@@ -122,6 +147,190 @@ NETWORK_PREFIXES = (
     "urlopen",
 )
 
+# CLI argument names that look like scientific parameters rather than
+# operational flags. Used to decide whether a large CLI surface is a hard
+# error (scientific parameters exposed) or a warning (merely busy).
+SCIENTIFIC_ARG_NAME = re.compile(
+    r"^(alpha|beta|sigma|gamma|lambda_|epsilon|tol|tolerance|seed|split|"
+    r"fold|folds|window|threshold|cutoff|normalization|normalize|baseline|"
+    r"method|mode|freq|frequency|sampling_rate|epoch|epochs|permutation|"
+    r"permutations|n_permutations|bootstrap|n_bootstrap|smoothing|filter|"
+    r"n_components|regularization|min_.+|max_.+|.+_ms|.+_hz)$",
+    re.IGNORECASE,
+)
+
+# Docstring contract sections accept NumPy (Parameters/Returns), Google
+# (Args/Returns), Sphinx (:param:) and Chinese headings, so that a genuine
+# contract is not flagged merely for its documentation style or language.
+DOCSTRING_PATTERNS = {
+    "input semantics": re.compile(
+        r"\b(inputs?|parameters?|args|arguments)\b|:param|输入|参数",
+        re.IGNORECASE,
+    ),
+    "transformation": re.compile(
+        r"\b(processing|transformation|transforms?|method|procedure|"
+        r"algorithm|steps?|approach|computes?|calculates?)\b|"
+        r"变换|转换|算法|方法|流程|步骤|处理",
+        re.IGNORECASE,
+    ),
+    "output semantics": re.compile(
+        r"\b(outputs?|returns?|yields)\b|:returns?:|输出|返回",
+        re.IGNORECASE,
+    ),
+    "mutation/side effects": re.compile(
+        r"\b(mutations?|side[ -]?effects?|in[ -]?place|mutates?|modifies|"
+        r"modifying)\b|副作用|就地|原地|不修改|无修改",
+        re.IGNORECASE,
+    ),
+}
+
+# Template prose that indicates an optimization report was copied verbatim
+# instead of being filled with real measurements.
+PLACEHOLDER_TEXT = re.compile(
+    r"^\s*(describe\b|state\s+the\b|todo\b|record\s)", re.IGNORECASE
+)
+
+
+@dataclass(frozen=True)
+class ScopeConfig:
+    """Project-declared directory roles from scientific-code.toml."""
+
+    stage_roots: tuple[str, ...] = ()
+    view_roots: tuple[str, ...] = ()
+    artifact_roots: tuple[str, ...] = ()
+    infrastructure_roots: tuple[str, ...] = ()
+
+
+def load_scope_config(root: Path) -> ScopeConfig:
+    config_path = root / "scientific-code.toml"
+    if not config_path.is_file():
+        # A monorepo may nest self-contained scientific projects (each with
+        # its own scientific-code.toml) under an outer root that has none.
+        # Scope checks then classify by file content alone, which mislabels
+        # nested stages. Fall back to the nearest scientific-code.toml in any
+        # descendant directory so nested projects keep their own scope.
+        candidates = sorted(
+            path
+            for path in root.rglob("scientific-code.toml")
+            if path.is_file() and not is_ignored(path, root)
+        )
+        if candidates:
+            return load_scope_config(candidates[0].parent)
+        return ScopeConfig()
+    config: ScopeConfig = _parse_scope_config(config_path)
+    if config != ScopeConfig():
+        return config
+    # The root config exists but declares nothing usable; still allow a
+    # nested project config to take over, for the same monorepo reason.
+    candidates = sorted(
+        path
+        for path in root.rglob("scientific-code.toml")
+        if path.is_file() and not is_ignored(path, root) and path != config_path
+    )
+    if candidates:
+        return load_scope_config(candidates[0].parent)
+    return config
+
+
+@dataclass(frozen=True)
+class ScopeBinding:
+    """A scope config paired with the project root its paths are relative to.
+
+    In a monorepo the lint root and the project root differ: the project's
+    scientific-code.toml lives in a nested directory, and its stage_roots /
+    infrastructure_roots are relative to that directory, not to the lint
+    root. Every classification check must use `path_root`.
+    """
+
+    path_root: Path
+    config: ScopeConfig
+
+    def is_under(self, path: Path, roots: tuple[str, ...]) -> bool:
+        return is_under_roots(path, self.path_root, roots)
+
+
+def scope_binding(root: Path) -> ScopeBinding:
+    config_path = root / "scientific-code.toml"
+    if config_path.is_file() and _parse_scope_config(config_path) != ScopeConfig():
+        return ScopeBinding(path_root=root, config=_parse_scope_config(config_path))
+    candidates = sorted(
+        path
+        for path in root.rglob("scientific-code.toml")
+        if path.is_file() and not is_ignored(path, root)
+    )
+    if candidates:
+        project_root = candidates[0].parent
+        return ScopeBinding(path_root=project_root, config=_parse_scope_config(candidates[0]))
+    return ScopeBinding(path_root=root, config=ScopeConfig())
+
+
+def _parse_scope_config(config_path: Path) -> ScopeConfig:
+    if tomllib is None:
+        print(
+            "scientific-code lint: scientific-code.toml found but tomllib is "
+            "unavailable (Python < 3.11); ignoring the project scope config.",
+            file=sys.stderr,
+        )
+        return ScopeConfig()
+    try:
+        with config_path.open("rb") as stream:
+            data = tomllib.load(stream)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        print(
+            f"scientific-code lint: could not parse scientific-code.toml: {error}",
+            file=sys.stderr,
+        )
+        return ScopeConfig()
+    scope = data.get("scope", {})
+    if not isinstance(scope, dict):
+        return ScopeConfig()
+    if tomllib is None:
+        print(
+            "scientific-code lint: scientific-code.toml found but tomllib is "
+            "unavailable (Python < 3.11); ignoring the project scope config.",
+            file=sys.stderr,
+        )
+        return ScopeConfig()
+    try:
+        with config_path.open("rb") as stream:
+            data = tomllib.load(stream)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        print(
+            f"scientific-code lint: could not parse scientific-code.toml: {error}",
+            file=sys.stderr,
+        )
+        return ScopeConfig()
+    scope = data.get("scope", {})
+    if not isinstance(scope, dict):
+        return ScopeConfig()
+
+    def roots(key: str) -> tuple[str, ...]:
+        value = scope.get(key, [])
+        if not isinstance(value, list):
+            return ()
+        return tuple(
+            str(item).replace("\\", "/").strip("/")
+            for item in value
+            if isinstance(item, str) and item.strip("/")
+        )
+
+    return ScopeConfig(
+        stage_roots=roots("stage_roots"),
+        view_roots=roots("view_roots"),
+        artifact_roots=roots("artifact_roots"),
+        infrastructure_roots=roots("infrastructure_roots"),
+    )
+
+
+def is_under_roots(path: Path, root: Path, roots: tuple[str, ...]) -> bool:
+    if not roots:
+        return False
+    try:
+        relative = path.relative_to(root).as_posix()
+    except ValueError:
+        return False
+    return any(relative == entry or relative.startswith(entry + "/") for entry in roots)
+
 
 @dataclass(frozen=True)
 class Issue:
@@ -182,17 +391,25 @@ def contains_marker(text: str, marker: str) -> bool:
     )
 
 
-def is_stage_file(path: Path, root: Path, text: str) -> bool:
+def is_stage_file(path: Path, binding: ScopeBinding, text: str) -> bool:
+    path_root = binding.path_root
+    scope = binding.config
     try:
-        relative = path.relative_to(root)
+        relative = path.relative_to(path_root)
     except ValueError:
         relative = path
     lowered_parts = {part.lower() for part in relative.parts[:-1]}
     if lowered_parts & {"test", "tests", "template", "templates"}:
         return False
+    # An explicit in-file marker is the strongest signal and always wins.
+    if contains_marker(text, "stage"):
+        return True
+    if binding.is_under(path, scope.infrastructure_roots):
+        return False
+    if binding.is_under(path, scope.stage_roots):
+        return True
     return (
         bool(lowered_parts & STAGE_DIRECTORIES)
-        or contains_marker(text, "stage")
         or (
             len(relative.parts) == 1
             and bool(STAGE_STEM.match(path.stem.lower()))
@@ -200,17 +417,24 @@ def is_stage_file(path: Path, root: Path, text: str) -> bool:
     )
 
 
-def is_view_file(path: Path, root: Path, text: str) -> bool:
+def is_view_file(path: Path, binding: ScopeBinding, text: str) -> bool:
+    path_root = binding.path_root
+    scope = binding.config
     try:
-        relative = path.relative_to(root)
+        relative = path.relative_to(path_root)
     except ValueError:
         relative = path
     lowered_parts = {part.lower() for part in relative.parts[:-1]}
     if lowered_parts & {"test", "tests", "template", "templates"}:
         return False
+    if contains_marker(text, "view"):
+        return True
+    if binding.is_under(path, scope.infrastructure_roots):
+        return False
+    if binding.is_under(path, scope.view_roots):
+        return True
     return (
         bool(lowered_parts & VIEW_DIRECTORIES)
-        or contains_marker(text, "view")
         or (
             len(relative.parts) == 1
             and bool(VIEW_STEM.match(path.stem.lower()))
@@ -233,9 +457,13 @@ def discover_python_files(root: Path) -> list[Path]:
     )
 
 
-def git_changed_python_files(root: Path) -> set[Path] | None:
+def git_changed_python_files(root: Path, base_ref: str | None = None) -> set[Path] | None:
+    if base_ref:
+        diff_target = f"{base_ref}...HEAD"
+    else:
+        diff_target = "HEAD"
     commands = [
-        ["git", "-C", str(root), "diff", "--name-only", "--diff-filter=ACMR", "HEAD", "--"],
+        ["git", "-C", str(root), "diff", "--name-only", "--diff-filter=ACMR", diff_target, "--"],
         ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard"],
     ]
     discovered: set[Path] = set()
@@ -248,6 +476,8 @@ def git_changed_python_files(root: Path) -> set[Path] | None:
                 check=False,
                 capture_output=True,
                 text=True,
+                # Guard against a hung or oddly-configured git blocking lint;
+                # 20s is far beyond any plausible metadata query.
                 timeout=20,
             )
         except (OSError, subprocess.SubprocessError):
@@ -271,66 +501,134 @@ def module_name(path: Path, root: Path) -> str:
     return ".".join(relative.parts)
 
 
-def imported_stage(
+def project_module_names(paths: Sequence[Path], root: Path) -> dict[str, Path]:
+    """Map importable module names to project files (resolved paths).
+
+    Includes `src.`-stripped aliases and package aliases for __init__.py so
+    that imports can be resolved to actual project files — and third-party
+    modules (which resolve to nothing) are never confused with local stages.
+    """
+    modules: dict[str, Path] = {}
+    for path in paths:
+        name = module_name(path, root)
+        resolved = path.resolve()
+        modules.setdefault(name, resolved)
+        if name.startswith("src."):
+            modules.setdefault(name[4:], resolved)
+        if name.endswith(".__init__"):
+            modules.setdefault(name[: -len(".__init__")], resolved)
+    return modules
+
+
+def package_parts_of(current: Path, root: Path) -> list[str]:
+    try:
+        return list(current.relative_to(root).with_suffix("").parts[:-1])
+    except ValueError:
+        return list(current.with_suffix("").parts[:-1])
+
+
+def resolve_candidates(
+    candidates: Iterable[str],
+    current: Path,
+    root: Path,
+    project_modules: dict[str, Path],
+) -> str | None:
+    """Resolve import candidates to a project module name, or None.
+
+    Resolution order: exact project module, `src.`-stripped form, package-
+    relative form (sibling imports in flat, non-package layouts), and finally
+    a unique-stem fallback for bare names imported through sys.path tricks.
+    """
+    package_parts = package_parts_of(current, root)
+    for candidate in candidates:
+        if not candidate:
+            continue
+        forms = [candidate, candidate.removeprefix("src.")]
+        if package_parts:
+            forms.append(".".join(package_parts + [candidate]))
+        for form in forms:
+            if form in project_modules:
+                return form
+    for candidate in candidates:
+        if candidate and "." not in candidate:
+            suffix = "." + candidate
+            for module in project_modules:
+                if module.endswith(suffix):
+                    return module
+    return None
+
+
+def iter_imports(
     tree: ast.AST,
     current: Path,
-    stage_files: Sequence[Path],
     root: Path,
-) -> tuple[int, str] | None:
-    stage_modules: set[str] = set()
-    stage_stems: set[str] = set()
+    project_modules: dict[str, Path],
+) -> list[tuple[int, str, str | None]]:
+    """Return (line, display name, resolved project module or None) per import."""
+    results: list[tuple[int, str, str | None]] = []
 
-    for stage_path in stage_files:
-        if stage_path.resolve() == current.resolve():
-            continue
-        name = module_name(stage_path, root)
-        stage_modules.add(name)
-        if name.startswith("src."):
-            stage_modules.add(name[4:])
-        stage_stems.add(stage_path.stem)
-
-    def matches(name: str) -> bool:
-        parts = name.split(".")
-        return (
-            "stages" in parts
-            or name in stage_modules
-            or name.removeprefix("src.") in stage_modules
-            or (len(parts) == 1 and name in stage_stems)
-        )
+    def canonical(resolved: str | None) -> str | None:
+        if resolved is None:
+            return None
+        target = project_modules.get(resolved)
+        return module_name(target, root) if target is not None else None
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if matches(alias.name):
-                    return node.lineno, alias.name
+                resolved = resolve_candidates(
+                    [alias.name], current, root, project_modules
+                )
+                results.append((node.lineno, alias.name, canonical(resolved)))
         elif isinstance(node, ast.ImportFrom):
-            imported_modules: list[str] = []
+            candidates: list[str] = []
+            display = node.module or ""
             if node.level:
-                try:
-                    package_parts = list(
-                        current.relative_to(root).with_suffix("").parts[:-1]
-                    )
-                except ValueError:
-                    package_parts = list(current.with_suffix("").parts[:-1])
+                package_parts = package_parts_of(current, root)
                 parents_to_remove = node.level - 1
                 if parents_to_remove <= len(package_parts):
                     if parents_to_remove:
                         package_parts = package_parts[:-parents_to_remove]
-                    module_parts = node.module.split(".") if node.module else []
-                    base_parts = package_parts + module_parts
+                    base = package_parts + (node.module.split(".") if node.module else [])
+                    candidates.extend(
+                        ".".join(base + [alias.name]) for alias in node.names
+                    )
                     if node.module:
-                        imported_modules.append(".".join(base_parts))
-                    else:
-                        imported_modules.extend(
-                            ".".join(base_parts + [alias.name])
-                            for alias in node.names
-                        )
+                        candidates.append(".".join(base))
+                    display = ".".join(base) or display
             elif node.module:
-                imported_modules.append(node.module)
+                candidates.extend(f"{node.module}.{alias.name}" for alias in node.names)
+                candidates.append(node.module)
+            resolved = resolve_candidates(candidates, current, root, project_modules)
+            results.append((node.lineno, display, canonical(resolved)))
+    return results
 
-            for imported in imported_modules:
-                if matches(imported):
-                    return node.lineno, imported
+
+def find_stage_route(
+    start: str,
+    import_graph: dict[str, set[str]],
+    project_modules: dict[str, Path],
+    stage_paths: set[Path],
+    origin: Path,
+) -> list[str] | None:
+    """DFS from a directly imported module; return a route to any stage module."""
+    stack = [(start, [start])]
+    visited: set[str] = set()
+    while stack:
+        node, route = stack.pop()
+        if node in visited:
+            continue
+        visited.add(node)
+        node_path = project_modules.get(node)
+        if (
+            node_path is not None
+            and node_path.resolve() != origin
+            and node_path in stage_paths
+        ):
+            return route
+        for follow in sorted(import_graph.get(node, ())):
+            if follow not in visited:
+                stack.append((follow, route + [follow]))
     return None
 
 
@@ -396,17 +694,28 @@ def find_hidden_branch(tree: ast.AST) -> tuple[int, str] | None:
     return None
 
 
-def cli_argument_lines(tree: ast.AST) -> list[int]:
-    lines: list[int] = []
+def cli_arguments(tree: ast.AST) -> list[tuple[int, str | None]]:
+    """Return (line, argument name or None) for each CLI argument definition."""
+    arguments: list[tuple[int, str | None]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         name = qualified_name(node.func)
-        if name.endswith(".add_argument"):
-            lines.append(node.lineno)
-        elif name.endswith(".option") or name in {"typer.Option", "click.option"}:
-            lines.append(node.lineno)
-    return lines
+        if not (
+            name.endswith(".add_argument")
+            or name.endswith(".option")
+            or name in {"typer.Option", "click.option"}
+        ):
+            continue
+        argument_name: str | None = None
+        if (
+            node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            argument_name = node.args[0].value.lstrip("-").replace("-", "_")
+        arguments.append((node.lineno, argument_name))
+    return arguments
 
 
 def network_call(tree: ast.AST) -> tuple[int, str] | None:
@@ -541,23 +850,58 @@ def likely_scientific_function(
     return bool(tokens & SCIENTIFIC_VERBS) and bool(function_parameters(function))
 
 
-def missing_contract_sections(
-    function: ast.FunctionDef | ast.AsyncFunctionDef,
-) -> list[str]:
-    doc = ast.get_docstring(function, clean=False) or ""
-    lowered = doc.lower()
+def missing_contract_sections(doc: str) -> list[str]:
+    """List contract sections absent from a docstring.
+
+    Accepts NumPy, Google, and Sphinx styles as well as Chinese headings;
+    a section counts as present when the docstring addresses the topic at
+    all, regardless of documentation convention.
+    """
     checks = {
+        # Roughly one meaningful sentence in any language; shorter
+        # docstrings rarely carry a contract worth auditing.
         "purpose": len(doc.strip()) >= 20,
-        "input semantics": bool(re.search(r"\b(input|inputs|parameters)\b", lowered)),
-        "transformation": bool(re.search(r"\b(processing|transformation|method|procedure)\b", lowered)),
-        "output semantics": bool(re.search(r"\b(output|outputs|returns)\b", lowered)),
-        "mutation/side effects": bool(re.search(r"\b(mutation|side effects?)\b", lowered)),
     }
+    for name, pattern in DOCSTRING_PATTERNS.items():
+        checks[name] = bool(pattern.search(doc))
     return [name for name, present in checks.items() if not present]
 
 
 def warning_suppressions(text: str) -> dict[str, str]:
     return {match.group(1): match.group(2).strip() for match in SUPPRESSION.finditer(text)}
+
+
+def view_scientific_computation(text: str) -> tuple[int, str] | None:
+    """First statistics pattern in executable view code.
+
+    Comments, docstrings, and string literals (including f-string text and
+    interpolation keys) are masked so provenance narratives ("bootstrap CI
+    computed by the analyze stage") and axis labels do not trip the check;
+    only real computation triggers SC109.
+    """
+    lines = text.splitlines(keepends=True)
+
+    def offset(pos: tuple[int, int]) -> int:
+        row, col = pos
+        return sum(len(line) for line in lines[: row - 1]) + col
+
+    prose_types = {tokenize.COMMENT, tokenize.STRING}
+    fstring_middle = getattr(tokenize, "FSTRING_MIDDLE", None)
+    if fstring_middle is not None:
+        prose_types.add(fstring_middle)
+    masked: list[tuple[int, int]] = []
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.type in prose_types:
+                masked.append((offset(token.start), offset(token.end)))
+    except (tokenize.TokenError, IndentationError):
+        masked = []
+    for match in VIEW_SCIENTIFIC_COMPUTATION.finditer(text):
+        if any(start <= match.start() < end for start, end in masked):
+            continue
+        line = text.count("\n", 0, match.start()) + 1
+        return line, match.group(0)
+    return None
 
 
 def find_files_named(root: Path, filename: str) -> list[Path]:
@@ -662,8 +1006,86 @@ def artifact_candidate_directories(root: Path) -> set[Path]:
     return candidates
 
 
-def optimization_report_targets(root: Path) -> set[str]:
-    targets: set[str] = set()
+def find_placeholder_text(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value.strip()[:60] if PLACEHOLDER_TEXT.match(value) else None
+    if isinstance(value, dict):
+        for item in value.values():
+            found = find_placeholder_text(item)
+            if found:
+                return found
+    if isinstance(value, list):
+        for item in value:
+            found = find_placeholder_text(item)
+            if found:
+                return found
+    return None
+
+
+def validate_optimization_report(report: dict[str, Any]) -> list[str]:
+    """Check that an optimization report contains real end-to-end evidence.
+
+    A report that merely names the stage does not count: the speedup must be
+    the ratio of the two measured end-to-end times, scientific equivalence
+    must have passed, and template placeholder prose is rejected.
+    """
+    problems: list[str] = []
+    if not isinstance(report.get("stage"), str):
+        problems.append("missing stage name")
+
+    reference = report.get("reference")
+    optimized = report.get("optimized")
+    reference_time = (
+        reference.get("end_to_end_wall_time_s") if isinstance(reference, dict) else None
+    )
+    optimized_time = (
+        optimized.get("end_to_end_wall_time_s") if isinstance(optimized, dict) else None
+    )
+    times_valid = (
+        isinstance(reference_time, (int, float))
+        and reference_time > 0
+        and isinstance(optimized_time, (int, float))
+        and optimized_time > 0
+    )
+    if not times_valid:
+        problems.append("reference/optimized end-to-end times are missing or invalid")
+    else:
+        speedup = report.get("pipeline_speedup")
+        if not isinstance(speedup, (int, float)):
+            problems.append("pipeline_speedup is missing")
+        else:
+            expected = reference_time / optimized_time
+            # 1% tolerance absorbs rounding in reported timings without
+            # accepting claims that misstate the measured ratio.
+            if abs(speedup - expected) / expected > 0.01:
+                problems.append(
+                    "pipeline_speedup does not equal the reference/optimized ratio"
+                )
+
+    equivalence = report.get("scientific_equivalence")
+    if not isinstance(equivalence, dict) or equivalence.get("result") != "pass":
+        problems.append("scientific_equivalence.result is not 'pass'")
+    if report.get("decision") not in {"accept", "reject"}:
+        problems.append("decision is missing or not accept/reject")
+
+    environment = report.get("environment")
+    if isinstance(environment, dict):
+        commit = str(environment.get("git_commit", ""))
+        if commit and set(commit) == {"0"}:
+            problems.append("environment.git_commit is a placeholder")
+
+    placeholder = find_placeholder_text(report)
+    if placeholder:
+        problems.append(f"contains template placeholder text: {placeholder!r}")
+    return problems
+
+
+def optimization_report_targets(root: Path) -> dict[str, list[str]]:
+    """Map stage-name keys to the validation problems of their report.
+
+    An empty problem list means a valid report covers that key.
+    """
+    targets: dict[str, list[str]] = {}
     for report_path in find_files_named(root, "optimization_report.json"):
         try:
             report = load_json(report_path)
@@ -671,18 +1093,21 @@ def optimization_report_targets(root: Path) -> set[str]:
             continue
         if not isinstance(report, dict) or not isinstance(report.get("stage"), str):
             continue
+        problems = validate_optimization_report(report)
         stage = report["stage"].replace("\\", "/").strip().lower()
-        targets.add(stage)
-        targets.add(Path(stage).stem.lower())
-        targets.add(stage.removesuffix(".py"))
+        for key in {stage, Path(stage).stem.lower(), stage.removesuffix(".py")}:
+            # A valid report wins over an invalid one for the same key.
+            if key not in targets or not problems:
+                targets[key] = problems
     return targets
 
 
-def optimization_report_covers(
+def optimization_report_problems(
     path: Path,
     root: Path,
-    targets: set[str],
-) -> bool:
+    targets: dict[str, list[str]],
+) -> list[str] | None:
+    """None if no report claims this file; otherwise the report's problems."""
     try:
         relative = path.relative_to(root).as_posix().lower()
     except ValueError:
@@ -692,158 +1117,181 @@ def optimization_report_covers(
         relative,
         relative.removesuffix(".py"),
     }
-    return bool(candidates & targets)
+    found: list[str] | None = None
+    for key in candidates:
+        if key in targets:
+            problems = targets[key]
+            if found is None or not problems:
+                found = problems
+    return found
 
 
-def check_artifacts(root: Path, collector: IssueCollector) -> None:
-    candidates = artifact_candidate_directories(root)
+def verify_artifact_dir(
+    artifact_dir: Path,
+    collector: IssueCollector,
+    full: bool,
+) -> None:
+    """Verify one artifact directory.
 
-    for artifact_dir in sorted(candidates):
-        manifest_path = artifact_dir / "manifest.json"
-        approval_path = artifact_dir / "approval.json"
+    Metadata mode (full=False) checks schema, paths, existence, derived
+    hashes, and approval binding without reading payload content, so lint
+    stays cheap on large data. Full mode additionally re-hashes every tracked
+    payload of an approved artifact to detect post-approval tampering.
+    """
+    manifest_path = artifact_dir / "manifest.json"
+    approval_path = artifact_dir / "approval.json"
 
-        if not manifest_path.is_file():
-            collector.add(
-                "error",
-                "SC004",
-                artifact_dir,
-                0,
-                "Artifact candidate has no manifest.json.",
-            )
-            continue
+    if not manifest_path.is_file():
+        collector.add(
+            "error",
+            "SC004",
+            artifact_dir,
+            0,
+            "Artifact candidate has no manifest.json.",
+        )
+        return
 
+    try:
+        manifest = load_json(manifest_path)
+    except (OSError, json.JSONDecodeError) as error:
+        collector.add(
+            "error",
+            "SC004",
+            manifest_path,
+            0,
+            f"Artifact manifest is unreadable: {error}.",
+        )
+        return
+
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("files"), dict):
+        collector.add(
+            "error",
+            "SC004",
+            manifest_path,
+            0,
+            "Artifact manifest must contain a files object.",
+        )
+        return
+    identity_files = manifest.get("identity_files")
+    if (
+        not isinstance(identity_files, list)
+        or not identity_files
+        or any(not isinstance(name, str) for name in identity_files)
+        or any(name not in manifest["files"] for name in identity_files)
+    ):
+        collector.add(
+            "error",
+            "SC004",
+            manifest_path,
+            0,
+            "Artifact manifest must list non-empty identity_files present in files.",
+        )
+        return
+
+    approval: dict[str, Any] | None = None
+    if approval_path.is_file():
         try:
-            manifest = load_json(manifest_path)
-        except (OSError, json.JSONDecodeError) as error:
+            loaded_approval = load_json(approval_path)
+            if isinstance(loaded_approval, dict):
+                approval = loaded_approval
+            else:
+                raise ValueError("approval root is not an object")
+        except (OSError, json.JSONDecodeError, ValueError) as error:
             collector.add(
                 "error",
-                "SC004",
-                manifest_path,
+                "SC003",
+                approval_path,
                 0,
-                f"Artifact manifest is unreadable: {error}.",
+                f"Approval record is unreadable: {error}.",
             )
-            continue
 
-        if not isinstance(manifest, dict) or not isinstance(manifest.get("files"), dict):
-            collector.add(
-                "error",
-                "SC004",
-                manifest_path,
-                0,
-                "Artifact manifest must contain a files object.",
-            )
-            continue
-        identity_files = manifest.get("identity_files")
-        if (
-            not isinstance(identity_files, list)
-            or not identity_files
-            or any(not isinstance(name, str) for name in identity_files)
-            or any(name not in manifest["files"] for name in identity_files)
-        ):
-            collector.add(
-                "error",
-                "SC004",
-                manifest_path,
-                0,
-                "Artifact manifest must list non-empty identity_files present in files.",
-            )
-            continue
+    approved = approval is not None and approval.get("status") == "approved"
+    artifact_hash = derived_artifact_hash(manifest)
+    manifest_hash = derived_manifest_hash(manifest)
+    tracked_content_changed = False
+    tracked_names = {str(name).replace("\\", "/") for name in manifest["files"]}
 
-        approval: dict[str, Any] | None = None
-        if approval_path.is_file():
-            try:
-                loaded_approval = load_json(approval_path)
-                if isinstance(loaded_approval, dict):
-                    approval = loaded_approval
-                else:
-                    raise ValueError("approval root is not an object")
-            except (OSError, json.JSONDecodeError, ValueError) as error:
+    for relative_name, expected_hash in sorted(manifest["files"].items()):
+        tracked_path = artifact_dir / str(relative_name)
+        if not stays_within(tracked_path, artifact_dir):
+            if approved:
                 collector.add(
                     "error",
-                    "SC003",
-                    approval_path,
+                    "SC007",
+                    manifest_path,
                     0,
-                    f"Approval record is unreadable: {error}.",
+                    f"Tracked path escapes artifact directory: {relative_name!r}.",
                 )
-
-        approved = approval is not None and approval.get("status") == "approved"
-        artifact_hash = derived_artifact_hash(manifest)
-        manifest_hash = derived_manifest_hash(manifest)
-        tracked_content_changed = False
-        tracked_names = {str(name).replace("\\", "/") for name in manifest["files"]}
-
-        for relative_name, expected_hash in sorted(manifest["files"].items()):
-            tracked_path = artifact_dir / str(relative_name)
-            if not stays_within(tracked_path, artifact_dir):
-                if approved:
-                    collector.add(
-                        "error",
-                        "SC007",
-                        manifest_path,
-                        0,
-                        f"Tracked path escapes artifact directory: {relative_name!r}.",
-                    )
-                    tracked_content_changed = True
-                continue
-            if not tracked_path.is_file():
-                if approved:
-                    collector.add(
-                        "error",
-                        "SC007",
-                        tracked_path,
-                        0,
-                        "Tracked artifact file is missing after approval.",
-                    )
-                    tracked_content_changed = True
-                continue
-            actual_hash = sha256_file(tracked_path)
-            if actual_hash != expected_hash and approved:
+                tracked_content_changed = True
+            continue
+        if not tracked_path.is_file():
+            if approved:
                 collector.add(
                     "error",
                     "SC007",
                     tracked_path,
                     0,
-                    f"Tracked content changed after approval; expected {expected_hash}, got {actual_hash}.",
+                    "Tracked artifact file is missing after approval.",
+                )
+                tracked_content_changed = True
+            continue
+        if full and approved:
+            actual_hash = sha256_file(tracked_path)
+            if actual_hash != expected_hash:
+                collector.add(
+                    "error",
+                    "SC007",
+                    tracked_path,
+                    0,
+                    f"Tracked content changed after approval; expected "
+                    f"{expected_hash}, got {actual_hash}.",
                 )
                 tracked_content_changed = True
 
-        if approved:
-            allowed_untracked = {"approval.json", "manifest.json"}
-            for actual_path in sorted(artifact_dir.rglob("*")):
-                if not actual_path.is_file():
-                    continue
-                relative_name = actual_path.relative_to(artifact_dir).as_posix()
-                if relative_name not in tracked_names | allowed_untracked:
-                    collector.add(
-                        "error",
-                        "SC007",
-                        actual_path,
-                        0,
-                        "Untracked file was added to an approved artifact.",
-                    )
-                    tracked_content_changed = True
+    if approved:
+        allowed_untracked = {"approval.json", "manifest.json"}
+        for actual_path in sorted(artifact_dir.rglob("*")):
+            if not actual_path.is_file():
+                continue
+            relative_name = actual_path.relative_to(artifact_dir).as_posix()
+            if relative_name not in tracked_names | allowed_untracked:
+                collector.add(
+                    "error",
+                    "SC007",
+                    actual_path,
+                    0,
+                    "Untracked file was added to an approved artifact.",
+                )
+                tracked_content_changed = True
 
-        if not approved:
-            continue
+    if not approved:
+        return
 
-        recorded_artifact_hash = manifest.get("artifact_hash")
-        recorded_manifest_hash = manifest.get("manifest_hash")
-        approval_artifact_hash = approval.get("artifact_hash") if approval else None
-        approval_manifest_hash = approval.get("manifest_hash") if approval else None
-        if (
-            tracked_content_changed
-            or recorded_artifact_hash != artifact_hash
-            or recorded_manifest_hash != manifest_hash
-            or approval_artifact_hash != artifact_hash
-            or approval_manifest_hash != manifest_hash
-        ):
-            collector.add(
-                "error",
-                "SC003",
-                approval_path if approval_path.is_file() else manifest_path,
-                0,
-                "Approved artifact/manifest hashes do not match canonical content and provenance.",
-            )
+    recorded_artifact_hash = manifest.get("artifact_hash")
+    recorded_manifest_hash = manifest.get("manifest_hash")
+    approval_artifact_hash = approval.get("artifact_hash") if approval else None
+    approval_manifest_hash = approval.get("manifest_hash") if approval else None
+    if (
+        tracked_content_changed
+        or recorded_artifact_hash != artifact_hash
+        or recorded_manifest_hash != manifest_hash
+        or approval_artifact_hash != artifact_hash
+        or approval_manifest_hash != manifest_hash
+    ):
+        collector.add(
+            "error",
+            "SC003",
+            approval_path if approval_path.is_file() else manifest_path,
+            0,
+            "Approved artifact/manifest hashes do not match canonical content and provenance.",
+        )
+
+
+def check_artifacts(root: Path, collector: IssueCollector, full: bool) -> None:
+    candidates = artifact_candidate_directories(root)
+
+    for artifact_dir in sorted(candidates):
+        verify_artifact_dir(artifact_dir, collector, full)
 
     for run_path in find_files_named(root, "run.json"):
         try:
@@ -874,7 +1322,18 @@ def check_artifacts(root: Path, collector: IssueCollector) -> None:
 
             input_dir = Path(raw_path)
             if not input_dir.is_absolute():
-                input_dir = root / input_dir
+                # Paths in run.json are relative to the owning project's
+                # root (the directory whose scientific-code.toml scopes the
+                # pipeline), which may differ from the lint root in a
+                # nested/monorepo layout.
+                input_dir = run_path.parent
+                while input_dir != input_dir.parent and not (
+                    input_dir / "scientific-code.toml"
+                ).is_file():
+                    input_dir = input_dir.parent
+                if not (input_dir / "scientific-code.toml").is_file():
+                    input_dir = root
+                input_dir = input_dir / raw_path
 
             approval_path = input_dir / "approval.json"
             manifest_path = input_dir / "manifest.json"
@@ -937,6 +1396,30 @@ def check_artifacts(root: Path, collector: IssueCollector) -> None:
                     0,
                     f"Input artifact {raw_path!r} does not match the approved hash recorded by the run.",
                 )
+                continue
+
+            if full:
+                # Metadata comparison alone cannot detect payload tampering in
+                # an external artifact; re-hash its tracked content.
+                for relative_name, expected_file_hash in sorted(
+                    manifest["files"].items()
+                ):
+                    tracked_path = input_dir / str(relative_name)
+                    payload_ok = (
+                        stays_within(tracked_path, input_dir)
+                        and tracked_path.is_file()
+                        and sha256_file(tracked_path) == expected_file_hash
+                    )
+                    if not payload_ok:
+                        collector.add(
+                            "error",
+                            "SC005",
+                            run_path,
+                            0,
+                            f"Input artifact {raw_path!r} payload "
+                            f"{relative_name!r} does not match its approved manifest.",
+                        )
+                        break
 
 
 def analyze_python(
@@ -944,33 +1427,96 @@ def analyze_python(
     root: Path,
     text: str,
     tree: ast.AST,
-    stage_files: Sequence[Path],
-    optimization_targets: set[str],
+    imports: list[tuple[int, str, str | None]],
+    project_modules: dict[str, Path],
+    import_graph: dict[str, set[str]],
+    stage_paths: set[Path],
+    scope: ScopeBinding,
+    optimization_targets: dict[str, list[str]],
     collector: IssueCollector,
 ) -> None:
-    stage = is_stage_file(path, root, text)
-    view = is_view_file(path, root, text)
+    stage = is_stage_file(path, scope, text)
+    view = is_view_file(path, scope, text)
+
+    if stage or view:
+        for line, display, resolved in imports:
+            if resolved is None:
+                continue
+            target_path = project_modules.get(resolved)
+            if target_path is None or target_path.resolve() == path.resolve():
+                continue
+            if target_path in stage_paths:
+                if stage:
+                    collector.add(
+                        "error",
+                        "SC001",
+                        path,
+                        line,
+                        f"Stage imports stage implementation {display!r}; "
+                        "depend on its artifact contract instead.",
+                    )
+                else:
+                    collector.add(
+                        "error",
+                        "SC006",
+                        path,
+                        line,
+                        f"View imports stage implementation {display!r}; "
+                        "consume an approved artifact instead.",
+                    )
+                continue
+            route = find_stage_route(
+                resolved, import_graph, project_modules, stage_paths, path.resolve()
+            )
+            if route:
+                pretty = " -> ".join(route)
+                if stage:
+                    collector.add(
+                        "error",
+                        "SC001",
+                        path,
+                        line,
+                        f"Stage reaches stage implementation transitively via "
+                        f"{display!r} ({pretty}); depend on the artifact contract instead.",
+                    )
+                else:
+                    collector.add(
+                        "error",
+                        "SC006",
+                        path,
+                        line,
+                        f"View reaches stage implementation transitively via "
+                        f"{display!r} ({pretty}); consume an approved artifact instead.",
+                    )
 
     if stage:
-        imported = imported_stage(tree, path, stage_files, root)
-        if imported:
-            line, name = imported
-            collector.add(
-                "error",
-                "SC001",
-                path,
-                line,
-                f"Stage imports stage implementation {name!r}; depend on its artifact contract instead.",
-            )
-
-        cli_lines = cli_argument_lines(tree)
-        if len(cli_lines) > 2:
+        cli_args = cli_arguments(tree)
+        scientific_args = [
+            (line, name)
+            for line, name in cli_args
+            if name and SCIENTIFIC_ARG_NAME.match(name)
+        ]
+        if scientific_args:
+            names = ", ".join(sorted({name for _, name in scientific_args}))
             collector.add(
                 "error",
                 "SC002",
                 path,
-                cli_lines[2],
-                f"Stage defines {len(cli_lines)} CLI parameters; put scientific configuration in TOML.",
+                scientific_args[0][0],
+                f"Stage exposes scientific parameter(s) via CLI ({names}); "
+                "put scientific configuration in TOML.",
+            )
+        # Documented ceiling: config path plus one operational flag. A
+        # busier CLI almost always means scientific parameters leaked out
+        # of the TOML config.
+        elif len(cli_args) > 2:
+            collector.add(
+                "warning",
+                "SC002",
+                path,
+                cli_args[2][0],
+                f"Stage defines {len(cli_args)} CLI parameters; keep the CLI "
+                "minimal and put configuration in TOML.",
             )
 
         if not is_acquisition_stage(path, text):
@@ -1008,19 +1554,30 @@ def analyze_python(
             )
 
         optimization = has_optimization_construct(tree)
-        if optimization and not optimization_report_covers(
-            path,
-            root,
-            optimization_targets,
-        ):
+        if optimization:
             line, name = optimization
-            collector.add(
-                "warning",
-                "SC105",
-                path,
-                line,
-                f"Optimization construct {name!r} has no optimization_report.json with end-to-end evidence.",
-            )
+            problems = optimization_report_problems(path, root, optimization_targets)
+            if problems is None:
+                collector.add(
+                    "warning",
+                    "SC105",
+                    path,
+                    line,
+                    f"Optimization construct {name!r} has no optimization_report.json with end-to-end evidence.",
+                )
+            elif problems:
+                joined = "; ".join(problems)
+                collector.add(
+                    "warning",
+                    "SC105",
+                    path,
+                    line,
+                    f"Optimization construct {name!r} has an optimization report, "
+                    f"but it lacks valid evidence: {joined}.",
+                )
+
+        module_doc = ast.get_docstring(tree, clean=False) or ""
+        module_contract_complete = not missing_contract_sections(module_doc)
 
         for node in tree.body if isinstance(tree, ast.Module) else []:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -1035,8 +1592,9 @@ def analyze_python(
                     line,
                     f"Function {node.name!r} may mutate input parameter {parameter!r}, obscuring lineage.",
                 )
-            if likely_scientific_function(node):
-                missing = missing_contract_sections(node)
+            if likely_scientific_function(node) and not module_contract_complete:
+                doc = ast.get_docstring(node, clean=False) or ""
+                missing = missing_contract_sections(doc)
                 if missing:
                     collector.add(
                         "warning",
@@ -1047,15 +1605,16 @@ def analyze_python(
                     )
 
     if view:
-        imported = imported_stage(tree, path, stage_files, root)
-        if imported:
-            line, name = imported
+        scientific_hit = view_scientific_computation(text)
+        if scientific_hit:
+            line, token_text = scientific_hit
             collector.add(
-                "error",
-                "SC006",
+                "warning",
+                "SC109",
                 path,
                 line,
-                f"View imports stage implementation {name!r}; consume an approved artifact instead.",
+                f"View appears to perform scientific computation ({token_text!r}); "
+                "move statistics to an analysis stage artifact and keep the view presentation-only.",
             )
 
     if stage or view:
@@ -1070,24 +1629,27 @@ def analyze_python(
                 f"Broad exception fallback ({name}) may hide a scientific or provenance failure.",
             )
 
-    if path.name.lower() in GENERIC_MODULE_NAMES:
-        collector.add(
-            "warning",
-            "SC103",
-            path,
-            1,
-            "Generic utility module obscures ownership; keep logic local or name the stable concept.",
-        )
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef) and ABSTRACTION_NAME.search(node.name):
+        # Naming-discipline heuristics apply only inside the scientific
+        # pipeline scope; legitimate infrastructure keeps its own conventions
+        # (see the scope gate in SKILL.md).
+        if path.name.lower() in GENERIC_MODULE_NAMES:
             collector.add(
                 "warning",
-                "SC102",
+                "SC103",
                 path,
-                node.lineno,
-                f"Abstraction {node.name!r} needs a concrete scientific concept or demonstrated reuse boundary.",
+                1,
+                "Generic utility module obscures ownership; keep logic local or name the stable concept.",
             )
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and ABSTRACTION_NAME.search(node.name):
+                collector.add(
+                    "warning",
+                    "SC102",
+                    path,
+                    node.lineno,
+                    f"Abstraction {node.name!r} needs a concrete scientific concept or demonstrated reuse boundary.",
+                )
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -1107,6 +1669,13 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Analyze changed/untracked Python files when Git metadata is available.",
     )
     parser.add_argument(
+        "--base-ref",
+        metavar="REF",
+        default=None,
+        help="Analyze files changed between REF's merge base and HEAD (for CI); "
+        "implies --changed-only.",
+    )
+    parser.add_argument(
         "--strict-warnings",
         action="store_true",
         help="Return a non-zero status when warnings remain.",
@@ -1122,6 +1691,13 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         action="store_true",
         help="Skip manifest, approval, and recorded-input integrity checks.",
     )
+    parser.add_argument(
+        "--full-artifact-checks",
+        action="store_true",
+        help="Re-hash approved artifact payloads and recorded input payloads. "
+        "Off by default so lint stays cheap on large data; enable for release "
+        "verification or scheduled integrity audits.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1131,6 +1707,7 @@ def run(argv: Sequence[str] | None = None) -> int:
     if not root.is_dir():
         print(f"scientific-code lint: project root does not exist: {root}", file=sys.stderr)
         return 2
+    scope = scope_binding(root)
 
     all_python_files = discover_python_files(root)
     text_by_path: dict[Path, str] = {}
@@ -1157,24 +1734,13 @@ def run(argv: Sequence[str] | None = None) -> int:
             f"Python source could not be read: {error}.",
         )
 
-    stage_files = [
-        path
-        for path, text in text_by_path.items()
-        if is_stage_file(path, root, text)
-    ]
-
-    selected_files = set(text_by_path)
-    if args.changed_only:
-        changed = git_changed_python_files(root)
-        if changed is not None:
-            selected_files &= changed
-
-    optimization_targets = optimization_report_targets(root)
-
-    for path in sorted(selected_files):
-        text = text_by_path[path]
+    # Parse every file once: the import graph needs imports from files that
+    # are not themselves selected for analysis (e.g. a middle module between
+    # two stages).
+    trees: dict[Path, ast.AST] = {}
+    for path, text in text_by_path.items():
         try:
-            tree = ast.parse(text, filename=str(path))
+            trees[path] = ast.parse(text, filename=str(path))
         except SyntaxError as error:
             collector.add(
                 "error",
@@ -1183,20 +1749,56 @@ def run(argv: Sequence[str] | None = None) -> int:
                 error.lineno or 0,
                 f"Python source could not be parsed: {error.msg}.",
             )
-            continue
 
+    stage_paths = {
+        path.resolve()
+        for path, text in text_by_path.items()
+        if is_stage_file(path, scope, text)
+    }
+
+    project_modules = project_module_names(all_python_files, root)
+    imports_by_path: dict[Path, list[tuple[int, str, str | None]]] = {}
+    import_graph: dict[str, set[str]] = {}
+    for path, tree in trees.items():
+        imports = iter_imports(tree, path, root, project_modules)
+        imports_by_path[path] = imports
+        module = module_name(path, root)
+        edges = import_graph.setdefault(module, set())
+        for _, _, resolved in imports:
+            if resolved is not None and resolved != module:
+                edges.add(resolved)
+
+    selected_files = set(text_by_path)
+    if args.changed_only or args.base_ref:
+        changed = git_changed_python_files(root, args.base_ref)
+        if changed is not None:
+            selected_files &= changed
+        elif args.base_ref:
+            print(
+                f"scientific-code lint: could not diff against {args.base_ref!r}; "
+                "falling back to all files.",
+                file=sys.stderr,
+            )
+
+    optimization_targets = optimization_report_targets(root)
+
+    for path in sorted(selected_files):
         analyze_python(
             path,
             root,
-            text,
-            tree,
-            stage_files,
+            text_by_path[path],
+            trees[path],
+            imports_by_path.get(path, []),
+            project_modules,
+            import_graph,
+            stage_paths,
+            scope,
             optimization_targets,
             collector,
         )
 
     if not args.no_artifact_checks:
-        check_artifacts(root, collector)
+        check_artifacts(root, collector, full=args.full_artifact_checks)
 
     collector.issues.sort(
         key=lambda issue: (
@@ -1223,6 +1825,8 @@ def run(argv: Sequence[str] | None = None) -> int:
                         "warnings": warnings,
                         "checked_python_files": len(selected_files),
                         "artifact_checks": not args.no_artifact_checks,
+                        "full_artifact_checks": bool(args.full_artifact_checks),
+                        "scope_config": (root / "scientific-code.toml").is_file(),
                     },
                 },
                 ensure_ascii=False,

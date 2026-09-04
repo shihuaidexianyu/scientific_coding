@@ -1,0 +1,23 @@
+{
+  "command": "python stages/preprocess.py",
+  "config": {
+    "path": "configs/preprocess.toml",
+    "sha256": "d349ce16f3a8c81ef8c950b96460f05adf824f1cbb34d71ce719f67b20a082e5"
+  },
+  "code": {
+    "path": "stages/preprocess.py",
+    "sha256": "24cd21afd4ef3a8ceaebe0f9e6a90363817047c3a628145bf28e8cca915d905d"
+  },
+  "input_artifacts": [
+    {
+      "path": "artifacts/raw_trials/run_001",
+      "artifact_hash": "sha256:20754c64d6160558e0ef0bd01fe5c863fc85ee12ee92bca35f32a24ee06a06d5",
+      "manifest_hash": "sha256:1170ce72203cb26fac9de072ac402be9062617d3e233731e0587d712965da76c"
+    }
+  ],
+  "produced_artifact": {
+    "path": "artifacts/processed_trials/run_001"
+  },
+  "started_at_utc": "2026-09-04T02:04:17Z",
+  "output_artifact_hash": "sha256:e344d587c468e1fe241be3554a00ba8e8f34bbbf21ee2cf4dfd07a11fdf039e2"
+}

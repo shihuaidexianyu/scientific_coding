@@ -1,0 +1,23 @@
+{
+  "command": "python stages/analyze.py",
+  "config": {
+    "path": "configs/analyze.toml",
+    "sha256": "fddee12530c06db41dd98dec913728950a57a84a89de4f29c20764d285daa7fb"
+  },
+  "code": {
+    "path": "stages/analyze.py",
+    "sha256": "f9b88562772e7bf40c80510f99a39bff55d214cff2e6693e822733e2af2c0772"
+  },
+  "input_artifacts": [
+    {
+      "path": "artifacts/processed_trials/run_001",
+      "artifact_hash": "sha256:e344d587c468e1fe241be3554a00ba8e8f34bbbf21ee2cf4dfd07a11fdf039e2",
+      "manifest_hash": "sha256:c14fe08044bfe17214d88d7f21c13d935afe2b0d5ff09c6bb3fc6548769dc741"
+    }
+  ],
+  "produced_artifact": {
+    "path": "artifacts/analysis_result/run_001"
+  },
+  "started_at_utc": "2026-09-04T02:04:43Z",
+  "output_artifact_hash": "sha256:1e532484c83dd9e387cfcbdcb0481dbca82e95fa72aec60c337fd04f350d6991"
+}
