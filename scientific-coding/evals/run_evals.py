@@ -123,6 +123,14 @@ def snapshot_baseline(workdir: Path) -> bool:
         return False
     git(workdir, "config", "user.email", "evals@example.com")
     git(workdir, "config", "user.name", "evals")
+    # Running example stages writes bytecode into the workdir; keep it out
+    # of the captured diff so the judge does not read it as agent output.
+    ignore = workdir / ".gitignore"
+    existing = ignore.read_text(encoding="utf-8") if ignore.exists() else ""
+    for entry in ("__pycache__/", "*.pyc"):
+        if entry not in existing:
+            existing += ("" if existing.endswith("\n") or not existing else "\n") + entry + "\n"
+    ignore.write_text(existing, encoding="utf-8")
     git(workdir, "add", "-A")
     return git(workdir, "commit", "-q", "-m", "baseline", "--allow-empty").returncode == 0
 
