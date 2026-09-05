@@ -1,65 +1,30 @@
 # Statistical validity
 
-The artifact contract tracks what each number means and where it came
-from; this reference tracks whether the number can bear the weight of the
-conclusion drawn from it. These questions are decided when a stage is
-written, not after a reviewer asks.
+Use when designing inference, resampling, splits, or scientific comparisons. Define the target estimand, population, design, and uncertainty before choosing a computation. Data provenance and reproducibility do not prove inference valid.
 
-Contents: observation unit — sampling unit — independence — statistical
-unit — split unit — permutation/exchangeability unit — bootstrap unit —
-aggregation unit
+## Relevant units
 
-## The seven units
+Describe the applicable units in the stage contract/docstring; mark irrelevant ones not applicable rather than inventing a split or resampling scheme. Several units may coincide.
 
-Answer all seven explicitly in the stage docstring or artifact contract.
-"Unit" always means "the thing a single index runs over"; confusing two of
-these is the most common quiet way a pipeline produces an impressive,
-invalid number.
+1. Observation: what each measured row/index represents.
+2. Sampling: how entities were sampled and the population the claim targets.
+3. Dependence: which observations share participants, sites, sessions, time dependence, or other correlation; specify modeled clusters or independent entities.
+4. Analysis: what enters the estimator/model, the target parameter, and how that parameter relates to the scientific question. A regression coefficient is not itself a sampling unit.
+5. Split: what must remain together across training/test/folds for the intended generalization target; fit learned preprocessing using training data only.
+6. Exchangeability: permitted label permutations or sign flips under the actual null, respecting design and dependence.
+7. Bootstrap: which entities are resampled and whether resampling is stratified, paired, clustered, hierarchical, or model-based.
+8. Aggregation: which entities are combined, their weights, and what reported counts represent.
 
-1. **Observation unit** — one measured entity (one trial, one cell, one
-   survey response). Row count of the raw artifact.
-2. **Sampling unit** — the entity drawn from the population the claim is
-   about (one participant, one animal, one site). Inference generalizes
-   only over resampled sampling units.
-3. **Independent unit** — the entity whose errors do not correlate; the
-   effective sample size of any p-value or interval. Repeated measurements
-   of one sampling unit are not independent units.
-4. **Statistical unit** — the entity one fitted parameter describes.
-5. **Split unit** — the entity kept whole when partitioning into train,
-   test, or folds. Rows sharing a split unit must land in the same split
-   or the evaluation leaks.
-6. **Permutation/exchangeability unit** — the entity shuffled under the
-   null. Swapping labels within a non-exchangeable block (e.g. within one
-   participant) produces a null that does not match the hypothesis.
-7. **Bootstrap unit** — the entity resampled. Bootstrapping observations
-   when the sampling unit is participants produces intervals that are too
-   narrow by roughly the cluster count.
-8. **Aggregation unit** — the entity collapsed before reporting (per
-   participant, per session, per run). Reported n after aggregation must
-   match the independent unit or the precision is overstated.
+Do not infer exchangeability solely from participant identity: within-block and whole-block permutation are both valid in appropriate designs. Explain why the chosen transformations preserve the null distribution. See [Winkler et al., 2014](https://pmc.ncbi.nlm.nih.gov/articles/PMC4010955/).
 
-## Non-negotiable checks
+Ignoring clustering can understate uncertainty, but its magnitude is not a universal multiple of the number of clusters. In a simple equal-size exchangeable-cluster setting the variance design effect is `1 + (m - 1) * rho`; applicability depends on the design and estimator. See [CONSORT cluster-trial methods](https://www.bmj.com/content/328/7441/702). State the relevant assumptions instead of copying this formula into unrelated analyses.
 
-- **n in every claim**: any reported effect, interval, or p-value states
-  which unit its n counts, and that unit is the independent unit.
-- **No double-dipping**: data used to select an analysis step (features,
-  regions, thresholds) is not also the data whose outcome is tested on
-  that step, unless the selection step is nested inside the resampling
-  loop.
-- **Multiple comparisons**: every family of tests or intervals states its
-  correction or carries an explicit per-comparison disclaimer in the
-  artifact summary.
-- **Random seeds are lineage, not validity**: a seed makes an artifact
-  reproducible. It does not make a small-n result stable; report seed
-  sensitivity (different seeds, same conclusion) when n is small.
-- **Deterministic ≠ valid**: a fully seeded, fully approved artifact can
-  still rest on shuffled blocks or leaked splits. The approval record
-  covers provenance; these checks cover inference.
+## Checks that protect the actual inference
 
-## Where each check lives
+Report n with its unit and relevant cluster/group counts. Do not confuse row count with independent information or claim every model's effective sample size equals a simple count. Check leakage and group overlap at the split/fit boundary where they can arise; reuse those guarantees internally.
 
-- The stage docstring names the seven units for its transformation.
-- The artifact contract's `[sample]` section records the sampling unit,
-  identity, and ordering.
-- The analysis artifact's summary states n with its unit and the
-  resampling scheme (n_bootstrap, seed, level, and what was resampled).
+Account for data-driven selection in inference through valid independent data, nested resampling, or an appropriate selective-inference method. State each test family's multiplicity policy and interpretation; a per-comparison disclaimer does not create familywise control.
+
+Record random seeds for reproducibility. Separate Monte Carlo error from uncertainty due to the sampled data. Increasing bootstrap replicates reduces simulation error in the estimated interval; it does not guarantee that the confidence interval becomes narrower. When resampling precision is inadequate, assess or increase simulation accuracy; do not search for seeds yielding a desired conclusion. Report observed seed sensitivity honestly; agreement across seeds is not proof of scientific validity.
+
+Place scientific calculations in a documented stage, retain experiment-defining mappings where needed, and include the estimand, sample counts, method assumptions, resampling design, and uncertainty in the result summary.

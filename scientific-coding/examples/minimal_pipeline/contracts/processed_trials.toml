@@ -1,0 +1,119 @@
+# 试次表的科学身份。
+name = "ProcessedTrials"
+
+# 解释约定的版本号，与每次运行编号相互独立。
+version = 1
+
+# 每行代表一个独立生成的合成试次。
+description = "振幅筛选保留试次 ID、单位及相对顺序；exclusions.csv 记录全部被移除 ID、原因和阶段。"
+
+# 数据位置与结构；文件路径相对本产物目录。
+[data]
+
+# UTF-8 CSV 含一行表头，不额外保存数据框索引。
+path = "data/processed_trials.csv"
+
+# 示例加载器采用的文件格式。
+format = "csv"
+
+# 数值仍是试次振幅，不是功率、标准分数或被试平均值。
+representation = "trial_amplitudes"
+
+# 行数可变，每行包含所声明的三个字段。
+dimensions = ["trial", "field"]
+
+# CSV 文本按下方字段类型进行转换。
+dtype = "mixed_record"
+
+# amplitude_uv 使用微伏，ID 与条件标签无量纲。
+unit = "amplitude_uv 使用微伏"
+
+# 禁止空字段和非有限振幅。
+missing_value = "not_allowed"
+
+# CSV 表的字段类型。
+[data.columns]
+
+# 带条件前缀的稳定试次 ID，例如 control-001。
+trial_id = "string"
+
+# 实验条件为 control 或 treatment。
+condition = "string"
+
+# 有限数值表示的试次振幅，单位为微伏。
+amplitude_uv = "float64"
+
+# 样本身份、分组与输出顺序。
+[sample]
+
+# 此合成设计中的独立观测与抽样单位。
+identity = "独立合成试次"
+
+# 整个流水线实际使用的 CSV 身份字段。
+id_column = "trial_id"
+
+# 每个原始试次最多对应一条保留行，不允许重复 ID。
+unique_ids = true
+
+# 沿用生成顺序：先 control 后 treatment，各组内部编号递增。
+ordering = "沿用上游生成顺序，仅包含保留 ID"
+
+# 下游试次层面推断所描述的总体。
+population = "振幅大于或等于配置下限的合成试次"
+
+# 各条件分别构成重采样分层。
+group_column = "condition"
+
+# 必须同时存在两种声明的条件，其他标签不属于本契约。
+group_values = ["control", "treatment"]
+
+# 每组至少两个试次，以支持本示例的下游计算。
+min_group_count = 2
+
+# 读取说明与后续使用方式。
+[reading]
+
+# 采用标准库 CSV 读取器，artifact_dir 应指向确切的本次产物。
+example = "list(csv.DictReader((artifact_dir / 'data/processed_trials.csv').open(newline='', encoding='utf-8')))"
+
+# 外部加载时将 amplitude_uv 转为 float 一次；同次生成的内存行已是数值。
+in_memory = "行字典列表；trial_id、condition 为字符串，amplitude_uv 为微伏 float；保持样本顺序"
+
+# 相对前一阶段或采集来源发生的变换。
+stage_change = "振幅筛选保留试次 ID、单位及相对顺序；exclusions.csv 记录全部被移除 ID、原因和阶段。"
+
+# 本阶段另行保存被移除的试次，便于阅读和追踪。
+[exclusions]
+
+# 路径相对本产物目录；没有排除时可仅有表头。
+path = "exclusions.csv"
+
+# UTF-8 CSV 含表头，每个被移除的输入试次对应一行。
+format = "csv"
+
+# ID 对应关系、行顺序以及保留与排除划分的完整性。
+alignment = "trial_id 与 RawTrials 一一关联，沿用上游顺序；与保留 ID 不相交，两表合起来覆盖全部输入 ID"
+
+# 字段不得为空；振幅使用微伏，其余字段为文本。
+units_and_missing = "amplitude_uv 使用微伏，其余字段为无量纲字符串；均不得缺失"
+
+# 读取排除记录后将 amplitude_uv 转为 float，以便进行数值比较。
+reading = "list(csv.DictReader((artifact_dir / 'exclusions.csv').open(newline='', encoding='utf-8')))"
+
+# 按说明转换振幅后的字段类型。
+[exclusions.columns]
+
+# 原始稳定试次 ID，可用于找到输入观测。
+trial_id = "string"
+
+# 原始实验条件为 control 或 treatment。
+condition = "string"
+
+# 排除前的原始有限振幅，单位为微伏。
+amplitude_uv = "float64"
+
+# 采用的阈值及未通过原因；这里记录排除决定，不表示缺失数据。
+reason = "string"
+
+# 产生排除决定的阶段，此处为 preprocess。
+stage = "string"

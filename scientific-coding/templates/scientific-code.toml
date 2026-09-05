@@ -1,12 +1,14 @@
-# Project scope for scientific-code lint
-#
-# Place at the project root. Files under stage/view roots are always treated
-# as pipeline code; files under infrastructure roots are exempt from
-# naming-discipline heuristics (SC102/SC103), matching the scope gate.
-# Paths are relative to this file, forward slashes.
-
+# 检查工具识别的目录角色，路径相对本文件。
 [scope]
+
+# 实现本研究科学变换的文件。
 stage_roots = ["stages", "analysis"]
+
+# 展示已有计算结果的文件。
 view_roots = ["figures", "views"]
+
+# 保存数据、契约与清单的位置。
 artifact_roots = ["artifacts"]
+
+# 可复用的执行和读写代码，不适用科学阶段的命名启发式。
 infrastructure_roots = ["src", "infra"]

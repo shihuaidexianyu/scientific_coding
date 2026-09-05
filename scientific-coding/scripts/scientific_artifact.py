@@ -11,13 +11,12 @@ never has to re-derive it:
     scientific_artifact.py verify   <dir> [--full]
     scientific_artifact.py approve  <dir> --reviewer <id> [--note TEXT]
 
-`finalize` is how an agent submits an artifact for review: it writes the
-manifest and a `pending_review` approval record. `approve` is a human-only
-action: it refuses to run without an interactive terminal, and requires
-typing a confirmation after inspecting the artifact summary.
+`finalize` writes a complete manifest and permits downstream work by default.
+Only `finalize --request-review` creates a pending decision for a user-selected
+pause. `approve` is an optional interactive review-recording command; a TTY
+is not proof that a human actually inspected the artifact.
 
-No third-party dependencies. Requires Python 3.11+ for TOML parsing (falls
-back to a minimal name/version reader otherwise).
+No third-party dependencies. Requires Python 3.11+ for TOML parsing.
 """
 
 from __future__ import annotations
@@ -33,58 +32,80 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import scientific_code_lint as lint
 
-try:
-    import tomllib
-except ImportError:  # Python < 3.11
-    tomllib = None
+import tomllib
 
 EXCLUDED_FROM_MANIFEST = {"manifest.json", "approval.json"}
 EXECUTION_METADATA = {"run.json", "runtime.json"}
 
-CONTRACT_SKELETON = '''name = "{name}"
-version = {version}
-description = "TODO: one sentence on the scientific meaning of this artifact."
+CONTRACT_SKELETON = '''# 数据集的科学身份；封存前须将全部 TODO 替换为真实说明。
+name = "{name}"
 
+# 科学解释改变时递增此版本。
+version = {version}
+
+# 说明此结果的科学含义。
+description = "TODO"
+
+# 数据的存储方式及其解释。
 [data]
+
+# 相对本产物目录的文件路径。
 path = "TODO"
+
+# 存储格式，例如 csv、json、npy 或 parquet。
+format = "TODO"
+
+# 本阶段产生的数据表示及其科学含义。
 representation = "TODO"
+
+# 按存储顺序声明各轴的含义。
 dimensions = ["TODO"]
+
+# 数组数值类型或表格字段类型说明。
 dtype = "TODO"
+
+# 物理单位；混合单位时须逐字段说明。
 unit = "TODO"
+
+# 所声明数据的缺失值约定。
 missing_value = "not_allowed"
 
+# 样本身份与排序含义。
 [sample]
+
+# 一个观测或汇总项代表什么。
 identity = "TODO"
-id_column = "sample_id"
+
+# 输出顺序及其与配套文件的对应关系。
 ordering = "TODO"
+
+# 经本阶段处理后结果所代表的总体。
 population = "TODO"
 
-[compatibility]
-consumers_require_exact_version = true
+# 打开结果的具体说明。
+[reading]
+
+# 使用相对本目录路径的读取调用示例。
+example = "TODO"
+
+# 加载所得对象、字段或数组轴及其含义。
+in_memory = "TODO"
 '''
 
 
 def read_contract_metadata(contract_path: Path) -> tuple[str, int]:
-    text = contract_path.read_text(encoding="utf-8")
-    if tomllib is not None:
-        data = tomllib.loads(text)
-        name = data.get("name")
-        version = data.get("version")
-        if not isinstance(name, str) or not isinstance(version, int):
-            raise ValueError("contract must define string 'name' and integer 'version'")
-        return name, version
-    name_match = re.search(r'^\s*name\s*=\s*"([^"]+)"', text, re.MULTILINE)
-    version_match = re.search(r"^\s*version\s*=\s*(\d+)", text, re.MULTILINE)
-    if not name_match or not version_match:
-        raise ValueError("contract must define string 'name' and integer 'version'")
-    return name_match.group(1), int(version_match.group(1))
+    data = tomllib.loads(contract_path.read_text(encoding="utf-8"))
+    problems = lint.contract_problems(data, contract_path.parent)
+    if problems:
+        raise ValueError("; ".join(problems))
+    return data["name"], data["version"]
 
 
 def tracked_files(artifact_dir: Path) -> list[str]:
     return sorted(
         path.relative_to(artifact_dir).as_posix()
         for path in artifact_dir.rglob("*")
-        if path.is_file() and path.name not in EXCLUDED_FROM_MANIFEST
+        if path.is_file() and path.relative_to(artifact_dir).as_posix() not in EXCLUDED_FROM_MANIFEST
     )
 
 
@@ -114,6 +135,9 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         print(f"error: no artifact_contract.toml in {artifact_dir}", file=sys.stderr)
         return 2
     approval_path = artifact_dir / "approval.json"
+    if (artifact_dir / "manifest.json").exists():
+        print("error: artifact is already finalized; create a new run", file=sys.stderr)
+        return 2
     if approval_path.is_file():
         try:
             status = json.loads(approval_path.read_text(encoding="utf-8")).get("status")
@@ -134,14 +158,17 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         return 2
 
     tracked = tracked_files(artifact_dir)
-    if not tracked:
+    if not any(name not in EXECUTION_METADATA | {"artifact_contract.toml"} for name in tracked):
         print(f"error: no payload files in {artifact_dir}", file=sys.stderr)
         return 2
 
-    identity = list(args.identity) if args.identity else [
+    identity = sorted(set(["artifact_contract.toml", *args.identity])) if args.identity else [
         name for name in tracked
         if name == "artifact_contract.toml" or name not in EXECUTION_METADATA
     ]
+    if set(identity) & EXECUTION_METADATA:
+        print("error: execution metadata cannot be identity files", file=sys.stderr)
+        return 2
     missing = [name for name in identity if name not in tracked]
     if missing:
         print(f"error: identity files not present: {missing}", file=sys.stderr)
@@ -157,6 +184,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         "schema_version": 1,
         "artifact_id": artifact_dir.name,
         "state": "produced",
+        "review_required": bool(args.request_review),
         "contract": {
             "name": name,
             "version": version,
@@ -172,13 +200,17 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     if run_path.is_file():
         try:
             run_record = json.loads(run_path.read_text(encoding="utf-8"))
+            if not isinstance(run_record, dict):
+                raise TypeError("run.json must contain an object")
+            manifest["artifact_id"] = run_record.get("run_id", artifact_dir.name)
             run_record["output_artifact_hash"] = manifest["artifact_hash"]
             run_path.write_text(
                 json.dumps(run_record, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
-        except json.JSONDecodeError:
-            print("warning: run.json is not valid JSON; left untouched", file=sys.stderr)
+        except (json.JSONDecodeError, TypeError):
+            print("error: run.json must be a valid JSON object", file=sys.stderr)
+            return 2
 
     for relative in tracked:
         if relative not in file_map:
@@ -196,7 +228,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     )
     temporary.replace(manifest_path)
 
-    if not approval_path.is_file():
+    if args.request_review:
         approval_path.write_text(
             json.dumps(
                 {
@@ -218,8 +250,10 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     print(f"  contract:      {name}@{version}")
     print(f"  artifact_hash: {manifest['artifact_hash']}")
     print(f"  manifest_hash: {manifest['manifest_hash']}")
-    print(f"  state:         produced -> pending_review")
-    print("next: a human reviews and runs `scientific_artifact.py approve`")
+    if args.request_review:
+        print("next: inspect the result at this user-selected review point")
+    else:
+        print("next: the finalized result may flow downstream")
     return 0
 
 
@@ -232,6 +266,11 @@ def verify_directory(artifact_dir: Path, full: bool) -> list[lint.Issue]:
 def cmd_verify(args: argparse.Namespace) -> int:
     artifact_dir = Path(args.directory)
     issues = verify_directory(artifact_dir, full=args.full)
+    if not issues and args.require_review:
+        manifest = lint.load_json(artifact_dir / "manifest.json")
+        if not lint.review_satisfied(artifact_dir, manifest):
+            print("error: this result awaits a user-selected review")
+            return 1
     for issue in issues:
         location = issue.serializable(artifact_dir)["path"]
         print(f"{issue.severity.upper()} {issue.code} {location} — {issue.message}")
@@ -261,7 +300,7 @@ def cmd_approve(args: argparse.Namespace) -> int:
         except json.JSONDecodeError:
             existing = {}
         if existing.get("status") == "approved":
-            issues = verify_directory(artifact_dir, full=False)
+            issues = verify_directory(artifact_dir, full=True)
             if not issues:
                 print("artifact is already approved and its hashes still verify")
                 return 0
@@ -272,7 +311,7 @@ def cmd_approve(args: argparse.Namespace) -> int:
             )
             return 1
 
-    issues = verify_directory(artifact_dir, full=args.full)
+    issues = verify_directory(artifact_dir, full=True)
     if issues:
         for issue in issues:
             print(f"{issue.severity.upper()} {issue.code} — {issue.message}")
@@ -340,7 +379,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     init.set_defaults(handler=cmd_init)
 
     finalize = subcommands.add_parser(
-        "finalize", help="Compute hashes, write the manifest, submit for review."
+        "finalize", help="Validate the contract, compute hashes, and complete the result."
     )
     finalize.add_argument("directory")
     finalize.add_argument(
@@ -350,6 +389,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Identity file (repeatable). Default: contract plus all payloads, "
         "excluding run.json/runtime.json.",
     )
+    finalize.add_argument("--request-review", action="store_true", help="Only for a user-selected human review point.")
     finalize.set_defaults(handler=cmd_finalize)
 
     verify = subcommands.add_parser("verify", help="Verify manifest and approval binding.")
@@ -359,6 +399,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Re-hash payload content, not just metadata (expensive on large data).",
     )
+    verify.add_argument("--require-review", action="store_true", help="Also honor a review_required manifest when consuming input.")
     verify.set_defaults(handler=cmd_verify)
 
     approve = subcommands.add_parser(
@@ -370,7 +411,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     approve.add_argument(
         "--full",
         action="store_true",
-        help="Re-hash payload content before approving (recommended for release).",
+        help="Compatibility flag: approval always re-hashes the reviewed content.",
     )
     approve.set_defaults(handler=cmd_approve)
 

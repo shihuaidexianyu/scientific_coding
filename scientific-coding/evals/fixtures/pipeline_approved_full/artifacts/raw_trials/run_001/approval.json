@@ -1,8 +1,0 @@
-{
-  "status": "approved",
-  "artifact_hash": "sha256:20754c64d6160558e0ef0bd01fe5c863fc85ee12ee92bca35f32a24ee06a06d5",
-  "manifest_hash": "sha256:1170ce72203cb26fac9de072ac402be9062617d3e233731e0587d712965da76c",
-  "reviewed_by": "maintainer",
-  "reviewed_at_utc": "2026-09-04T02:03:41Z",
-  "review_note": "inspected raw acquisition: 80 trials, synthetic provenance recorded"
-}

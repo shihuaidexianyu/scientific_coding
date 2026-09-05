@@ -27,8 +27,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import graders  # noqa: E402
+import run_evals
 
-JUDGE_COMMAND = ["claude", "-p", "{prompt}", "--output-format", "json"]
+JUDGE_COMMAND = ["claude", "-p", "{prompt}", "--output-format", "json", "--tools", ""]
 
 
 def load_cases(path: Path) -> dict[str, dict[str, Any]]:
@@ -56,13 +57,19 @@ def rep_jobs(
             if not verdict_path.is_file():
                 continue  # rep still running or crashed mid-run
             verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
-            if verdict.get("api_error"):
-                continue  # the agent call never executed; nothing to grade
             trajectory_path = rep / "trajectory.txt"
-            if "当前已达到" in trajectory_path.read_text(
-                encoding="utf-8", errors="replace"
-            ):
-                continue  # provider quota freeze predates api_error marking
+            trajectory = trajectory_path.read_text(encoding="utf-8", errors="replace")
+
+            # Older runs treated any failed tool as an API outage. Recover their
+            # assessable evidence using the final CLI result, then refresh the verdict.
+            if verdict.get("status") == "smoke" or verdict.get("backend") == "mock":
+                continue
+            verdict["api_error"] = run_evals.invocation_failed(trajectory, verdict.get("agent_returncode", 0))
+            verdict["skill_triggered"] = run_evals.skill_triggered(trajectory)
+            graders.decide_verdict(verdict, backend=verdict.get("backend", "claude"), requires_judge=cases[case_id].get("requires_judge", True))
+            verdict_path.write_text(json.dumps(verdict, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            if verdict["api_error"] or verdict.get("harness_error"):
+                continue
             if skip_graded and verdict.get("judge"):
                 continue
             yield rep, cases[case_id], verdict, verdict_path
@@ -76,6 +83,22 @@ def grade(
     timeout: int,
 ) -> tuple[str, dict[str, Any]]:
     lint_info = verdict.get("linter") or {}
+    final_source = None
+    produced = rep / "produced"
+    if produced.is_dir():
+        final_source = graders.source_evidence(produced)
+        (rep / "source_evidence.json").write_text(json.dumps(final_source, ensure_ascii=False, indent=2), encoding="utf-8")
+        lint = run_evals.run_linter(produced)
+        lint_info = graders.linter_summary(lint)
+        verdict["linter"] = lint_info
+        (rep / "lint.json").write_text(json.dumps(lint, ensure_ascii=False, indent=2), encoding="utf-8")
+        snapshot = rep / "initial_artifact_hashes.json"
+        before = json.loads(snapshot.read_text(encoding="utf-8")) if snapshot.is_file() else {}
+        conversation_path = rep / "conversation.json"
+        conversation = json.loads(conversation_path.read_text(encoding="utf-8")) if conversation_path.is_file() else None
+        verdict["outcomes"] = graders.outcome_checks(produced, case, before, conversation=conversation)
+        verdict["deterministic_violations"] = graders.check_patterns(produced, case.get("fail_if_patterns", []))
+        (rep / "outcomes.json").write_text(json.dumps(verdict["outcomes"], ensure_ascii=False, indent=2), encoding="utf-8")
     trajectory = (rep / "trajectory.txt").read_text(encoding="utf-8", errors="replace")
     diff_text = (rep / "diff.txt").read_text(encoding="utf-8", errors="replace")
     judge = graders.judge_case(
@@ -86,12 +109,11 @@ def grade(
         trajectory,
         cwd=rep,
         timeout=timeout,
+        outcomes=verdict.get("outcomes"),
+        final_source=final_source,
     )
     verdict["judge"] = judge
-    judge_pass = judge.get("pass")
-    verdict["pass"] = (not verdict.get("deterministic_violations")) and (
-        judge_pass in (True, None)
-    )
+    graders.decide_verdict(verdict, backend=verdict.get("backend", "claude"), requires_judge=case.get("requires_judge", True))
     verdict_path.write_text(
         json.dumps(verdict, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -134,6 +156,17 @@ def main(argv: list[str] | None = None) -> int:
                 flush=True,
             )
     print(f"graded {done}: judge-fail {judge_fails}, judge-error {errors}")
+    for raw_root in args.results_dirs:
+        root = Path(raw_root)
+        records = []
+        for path in root.glob("*__*/verdict.json"):
+            parts = path.parent.name.split("__")
+            if len(parts) == 4:
+                records.append({"case": parts[0], "mode": parts[1], "language": parts[2],
+                                "repetition": int(parts[3].removeprefix("rep")),
+                                "verdict": json.loads(path.read_text(encoding="utf-8"))})
+        if records:
+            run_evals.summarize(records, root)
     return 0
 
 

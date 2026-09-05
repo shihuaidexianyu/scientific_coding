@@ -1,0 +1,13 @@
+trial_id,amplitude_uv
+control-001,0.2
+treatment-001,0.6
+control-002,0.8
+treatment-002,0.9
+control-003,1.0
+treatment-003,1.2
+control-004,1.2
+treatment-004,1.5
+control-005,1.4
+treatment-005,1.8
+control-006,1.6
+treatment-006,2.1

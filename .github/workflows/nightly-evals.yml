@@ -1,0 +1,49 @@
+# Nightly evals against a real model backend.
+#
+# This is a scheduled signal, not a PR gate: real-model results vary, and a
+# flaky eval must not block merges. Results are archived as workflow
+# artifacts so trends can be compared across nights.
+name: scientific-coding-nightly-evals
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run explicit-mode evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python scientific-coding/evals/run_evals.py \
+            --backend claude --mode explicit --repetitions 3 --workers 6 --judge \
+            --results-dir evals-results/explicit
+
+      - name: Run baseline mode
+        if: always()
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python scientific-coding/evals/run_evals.py \
+            --backend claude --mode baseline --repetitions 3 --workers 6 --judge \
+            --results-dir evals-results/baseline
+
+      - name: Archive results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-evals-${{ github.run_id }}
+          path: evals-results/

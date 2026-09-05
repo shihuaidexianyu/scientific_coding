@@ -16,7 +16,7 @@ Use this heuristic as context, not a hard threshold:
 | over 24 hours | strongly consider resumability |
 | multi-day with intermittent nodes | normally add it |
 
-A request to checkpoint a 20-minute stable stage should normally be declined with the restart-cost rationale.
+For a 20-minute stable stage, explain why checkpoint complexity is unlikely to help; respect an explicit user constraint such as scheduled interruptions or a requested prototype.
 
 ## Workflow
 
@@ -33,7 +33,7 @@ A request to checkpoint a 20-minute stable stage should normally be declined wit
 
 For example, split 10,000 permutations into 100 deterministic shards of 100 permutations. Each shard writes a complete artifact such as `shard_000.parquet`. Resume by validating completed shard hashes, skipping them, and recomputing missing shards.
 
-Prefer this to serializing arbitrary Python stack, iterator, queue, or process state. A shard should be safe to rerun and replace before approval.
+Prefer this to serializing arbitrary Python stack, iterator, queue, or process state. A shard should be safe to rerun and replace before final publication.
 
 Keep the scientific unit simple:
 

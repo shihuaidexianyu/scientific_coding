@@ -6,3 +6,6 @@ __pycache__/
 # Eval harness output (see evals/run_evals.py)
 scientific-coding/evals/results/
 suggestion.md
+
+# Regenerated example results live in fresh run directories.
+scientific-coding/examples/minimal_pipeline/artifacts/

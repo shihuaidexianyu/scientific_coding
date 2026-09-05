@@ -12,7 +12,7 @@
   "input_artifacts": [
     {
       "path": "artifacts/raw_dataset/run_20260902_001",
-      "contract": "RawDatasetV1",
+      "contract": "RawDataset@1",
       "artifact_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
       "manifest_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     }

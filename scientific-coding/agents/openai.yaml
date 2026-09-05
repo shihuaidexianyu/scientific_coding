@@ -1,7 +1,6 @@
 interface:
   display_name: "Scientific Coding"
-  short_description: "Build auditable, stage-driven scientific pipelines"
-  default_prompt: "Use $scientific-coding. First apply the scope gate and classify the task. Read the required reference before editing. Follow only the applicable workflow, make the narrowest coherent change, run the relevant checks, and report the scientific diff. Do not impose the artifact architecture on out-of-scope or unrelated code. Never create or modify approval records."
+  short_description: "Write readable, annotated scientific pipelines"
+  default_prompt: "使用 $scientific-coding 完成这条流水线。按实现、简化、中文说明、自动格式、核验的职责分轮工作，保证科学准确性与可读性。每个函数提供可在调用处悬停读取的中文参数、结构、产物与逻辑说明。为涉及的每种源码和配置语言编写并执行注释空行格式脚本，检查最终文件。中途接入我的问题和改动，保护手动修改，只返工受影响部分。连续完成目标，除非我指定暂停点。"
 policy:
   allow_implicit_invocation: true
-

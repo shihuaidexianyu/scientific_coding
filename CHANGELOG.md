@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0 - 2026-09-05
+
+### Changed
+- Require Chinese file overviews, genuine hover-visible function documentation with spaced parameter/result structures, and Chinese semantic comments and data guides. Localize the maintained example and TOML templates accordingly.
+- Separate authoring into implementation, simplification, explanation, formatting, and verification passes, with local repairs and explicit handling of mid-review questions and user edits. Preserve manual changes and keep validation evidence tied to the code it checked.
+- Require local explanations for meaningful code operations and every TOML section/key, with a blank line before comment blocks. The agent must write/run a task-specific formatter across the actual source/config languages to enforce spacing without changing code or string meaning.
+- Describe all initial inputs, intermediate datasets, reading methods, and sample lineage, including joins, splits, and aggregation.
+- Reuse established guarantees; check only external entry facts and invariants actually threatened by a transformation. Avoid internal validation flags and repeated gates.
+- Run continuously by default; retain optional user-selected review points and honest provenance without compulsory approval files.
+- Respect user instructions and existing configuration systems. Replace rigid delivery forms with concise relevant evidence.
+- Rebuild the standard-library example with real contracts, fresh atomic publication, stable scientific hashes, complete explanations, and continuous output through the figure.
+
+### Fixed
+- Verify all finalized artifacts, including pending review, and verify full content before recording a review decision.
+- Reject placeholder or mismatched contracts, preserve finalized results, and separate execution timestamps from scientific identity.
+- Handle syntax and scope errors, per-project scopes, custom artifact roots, ambiguous imports, operational CLI suppression, and nested Git diff paths.
+- Correct clustered inference and exchangeability guidance, statistical-unit count, and interpretation of random-seed sensitivity.
+- Require task evidence and linter success in evaluations; distinguish unknown, invalid, smoke, and observed skill reads. Test new workflow behavior instead of compulsory gates.
+- Move CI workflows to the repository root and replace stale, artificially approved example fixtures with runnable source.
+
 ## 0.4.0 - 2026-09-04
 
 ### Added

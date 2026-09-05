@@ -1,194 +1,119 @@
-#!/usr/bin/env python3
-"""Tests for scripts/scientific_artifact.py.
-
-Covers the artifact lifecycle: init -> finalize -> verify -> approve, the
-non-TTY approval refusal (the agent self-approval guard), and interop with
-the linter's artifact checks.
-"""
-
-from __future__ import annotations
-
+"""Artifact integrity is independent of optional human review."""
 import contextlib
 import io
 import json
+from pathlib import Path
 import sys
 import tempfile
 import unittest
-from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-
 import scientific_artifact as artifact
-import scientific_code_lint as lint
+from support import contract_text
 
 
-def run_artifact(*argv: str) -> tuple[int, str, str]:
-    stdout, stderr = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-        code = artifact.run(list(argv))
-    return code, stdout.getvalue(), stderr.getvalue()
+def run_artifact(*args):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = artifact.run(list(args))
+    return code, out.getvalue(), err.getvalue()
 
 
 class FakeTty(io.StringIO):
-    def isatty(self) -> bool:
+    def isatty(self):
         return True
 
 
 class ArtifactToolTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
-        self.artifact_dir = self.root / "artifacts" / "ds" / "run_001"
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="sci-artifact-test-")
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name) / "run"
+        self.directory.mkdir()
+        (self.directory / "artifact_contract.toml").write_text(contract_text(), encoding="utf-8")
+        (self.directory / "data.csv").write_text("id,x\n1,0.5\n", encoding="utf-8")
+        (self.directory / "run.json").write_text('{"input_artifacts": []}', encoding="utf-8")
 
-    def tearDown(self) -> None:
-        self.tmp.cleanup()
+    def finalize(self, *args):
+        code, out, err = run_artifact("finalize", str(self.directory), *args)
+        self.assertEqual(code, 0, out + err)
+        return json.loads((self.directory / "manifest.json").read_text(encoding="utf-8"))
 
-    def init_and_finalize(self) -> None:
-        code, _, _ = run_artifact(
-            "init", str(self.artifact_dir), "--contract", "TestDataset@1"
-        )
-        self.assertEqual(code, 0)
-        (self.artifact_dir / "data.csv").write_text("id,x\n1,0.5\n", encoding="utf-8")
-        (self.artifact_dir / "run.json").write_text(
-            '{"run_id": "run_001", "status": "produced"}\n', encoding="utf-8"
-        )
-        code, out, _ = run_artifact("finalize", str(self.artifact_dir))
-        self.assertEqual(code, 0, out)
-
-    def read_manifest(self) -> dict:
-        return json.loads(
-            (self.artifact_dir / "manifest.json").read_text(encoding="utf-8")
-        )
-
-    def test_init_scaffolds_contract(self) -> None:
-        code, _, _ = run_artifact(
-            "init", str(self.artifact_dir), "--contract", "TestDataset@1"
-        )
-        self.assertEqual(code, 0)
-        contract = (self.artifact_dir / "artifact_contract.toml").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn('name = "TestDataset"', contract)
-        self.assertIn("version = 1", contract)
-
-    def test_init_refuses_nonempty_directory(self) -> None:
-        self.artifact_dir.mkdir(parents=True)
-        (self.artifact_dir / "data.csv").write_text("x\n", encoding="utf-8")
-        code, _, _ = run_artifact(
-            "init", str(self.artifact_dir), "--contract", "TestDataset@1"
-        )
-        self.assertEqual(code, 2)
-
-    def test_finalize_produces_verifying_manifest(self) -> None:
-        self.init_and_finalize()
-        code, out, _ = run_artifact("verify", str(self.artifact_dir))
-        self.assertEqual(code, 0, out)
-        manifest = self.read_manifest()
-        self.assertEqual(manifest["state"], "produced")
-        self.assertIn("artifact_contract.toml", manifest["identity_files"])
-        self.assertIn("data.csv", manifest["identity_files"])
-        # run.json is integrity-tracked but not an identity file
-        self.assertIn("run.json", manifest["files"])
+    def test_default_finalization_needs_no_approval(self):
+        manifest = self.finalize()
+        self.assertFalse(manifest["review_required"])
+        self.assertFalse((self.directory / "approval.json").exists())
+        self.assertEqual(run_artifact("verify", str(self.directory), "--full", "--require-review")[0], 0)
+        run = json.loads((self.directory / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual(run["output_artifact_hash"], manifest["artifact_hash"])
         self.assertNotIn("run.json", manifest["identity_files"])
 
-    def test_finalize_patches_run_json_with_artifact_hash(self) -> None:
-        self.init_and_finalize()
-        manifest = self.read_manifest()
-        run_record = json.loads(
-            (self.artifact_dir / "run.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(
-            run_record["output_artifact_hash"], manifest["artifact_hash"]
-        )
-
-    def test_finalize_submits_pending_review(self) -> None:
-        self.init_and_finalize()
-        approval = json.loads(
-            (self.artifact_dir / "approval.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(approval["status"], "pending_review")
-        self.assertEqual(approval["artifact_hash"], self.read_manifest()["artifact_hash"])
-
-    def test_finalize_refuses_approved_artifact(self) -> None:
-        self.init_and_finalize()
-        approval = {
-            "status": "approved",
-            "artifact_hash": self.read_manifest()["artifact_hash"],
-            "manifest_hash": self.read_manifest()["manifest_hash"],
-        }
-        (self.artifact_dir / "approval.json").write_text(
-            json.dumps(approval), encoding="utf-8"
-        )
-        code, _, err = run_artifact("finalize", str(self.artifact_dir))
-        self.assertEqual(code, 2)
-        self.assertIn("immutable", err)
-
-    def test_verify_full_detects_tamper_after_approval(self) -> None:
-        self.init_and_finalize()
-        manifest = self.read_manifest()
-        approval = {
-            "status": "approved",
-            "artifact_hash": manifest["artifact_hash"],
-            "manifest_hash": manifest["manifest_hash"],
-        }
-        (self.artifact_dir / "approval.json").write_text(
-            json.dumps(approval), encoding="utf-8"
-        )
-        (self.artifact_dir / "data.csv").write_text("id,x\n1,9.9\n", encoding="utf-8")
-        code, out, _ = run_artifact("verify", str(self.artifact_dir), "--full")
-        self.assertEqual(code, 1)
-        self.assertIn("SC007", out)
-
-    def test_approve_refuses_non_tty(self) -> None:
-        self.init_and_finalize()
-        # The test harness stdin/stdout are not TTYs; approval must refuse.
-        if sys.stdin.isatty():
-            self.skipTest("interactive environment")
-        code, _, err = run_artifact(
-            "approve", str(self.artifact_dir), "--reviewer", "tester"
-        )
-        self.assertEqual(code, 2)
-        self.assertIn("human action", err)
-        approval = json.loads(
-            (self.artifact_dir / "approval.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(approval["status"], "pending_review")
-
-    def test_approve_interactive_flow(self) -> None:
-        self.init_and_finalize()
-        fake_in, fake_out = FakeTty(), FakeTty()
-        with mock.patch.object(sys, "stdin", fake_in), mock.patch.object(
-            sys, "stdout", fake_out
-        ), mock.patch("builtins.input", return_value="approve"):
-            code = artifact.run(
-                ["approve", str(self.artifact_dir), "--reviewer", "tester"]
-            )
+    def test_explicit_pause_separates_integrity_from_review(self):
+        self.finalize("--request-review")
+        self.assertEqual(run_artifact("verify", str(self.directory), "--full")[0], 0)
+        self.assertEqual(run_artifact("verify", str(self.directory), "--require-review")[0], 1)
+        with mock.patch.object(sys, "stdin", FakeTty()), mock.patch.object(sys, "stdout", FakeTty()), mock.patch("builtins.input", return_value="approve"):
+            code = artifact.run(["approve", str(self.directory), "--reviewer", "isolated-test-reviewer"])
         self.assertEqual(code, 0)
-        approval = json.loads(
-            (self.artifact_dir / "approval.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(approval["status"], "approved")
-        self.assertEqual(approval["reviewed_by"], "tester")
-        # The linter must now fully accept the approved artifact.
-        collector = lint.IssueCollector(self.root, suppressions={})
-        lint.verify_artifact_dir(self.artifact_dir, collector, full=True)
-        self.assertEqual(collector.issues, [])
+        self.assertEqual(run_artifact("verify", str(self.directory), "--full", "--require-review")[0], 0)
 
-    def test_approve_wrong_confirmation_aborts(self) -> None:
-        self.init_and_finalize()
-        fake_in, fake_out = FakeTty(), FakeTty()
-        with mock.patch.object(sys, "stdin", fake_in), mock.patch.object(
-            sys, "stdout", fake_out
-        ), mock.patch("builtins.input", return_value="yes"):
-            code = artifact.run(
-                ["approve", str(self.artifact_dir), "--reviewer", "tester"]
-            )
+    def test_tampered_payload_is_rejected_before_first_review(self):
+        self.finalize("--request-review")
+        (self.directory / "data.csv").write_text("id,x\n1,999\n", encoding="utf-8")
+        self.assertEqual(run_artifact("verify", str(self.directory))[0], 0)
+        self.assertEqual(run_artifact("verify", str(self.directory), "--full")[0], 1)
+        with mock.patch.object(sys, "stdin", FakeTty()), mock.patch.object(sys, "stdout", FakeTty()), mock.patch("builtins.input") as confirmation:
+            code = artifact.run(["approve", str(self.directory), "--reviewer", "isolated-test-reviewer"])
         self.assertEqual(code, 1)
-        approval = json.loads(
-            (self.artifact_dir / "approval.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(approval["status"], "pending_review")
+        confirmation.assert_not_called()
+
+    def test_default_artifact_missing_payload_or_bad_hash_is_rejected(self):
+        self.finalize()
+        path = self.directory / "manifest.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        manifest["artifact_hash"] = "invalid"
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        self.assertEqual(run_artifact("verify", str(self.directory))[0], 1)
+        (self.directory / "data.csv").unlink()
+        self.assertEqual(run_artifact("verify", str(self.directory), "--full")[0], 1)
+
+    def test_finalized_result_is_not_overwritten(self):
+        self.finalize()
+        original = {p.name: p.read_bytes() for p in self.directory.iterdir()}
+        self.assertEqual(run_artifact("finalize", str(self.directory))[0], 2)
+        self.assertEqual(original, {p.name: p.read_bytes() for p in self.directory.iterdir()})
+
+    def test_custom_identity_automatically_binds_contract(self):
+        manifest = self.finalize("--identity", "data.csv")
+        self.assertEqual(set(manifest["identity_files"]), {"artifact_contract.toml", "data.csv"})
+
+    def test_execution_record_cannot_form_identity_cycle(self):
+        self.assertEqual(run_artifact("finalize", str(self.directory), "--identity", "run.json")[0], 2)
+
+    def test_placeholder_contract_cannot_be_finalized(self):
+        path = self.directory / "artifact_contract.toml"
+        path.write_text(contract_text().replace('representation = "scalar_measurements"', 'representation = "TODO"'), encoding="utf-8")
+        self.assertEqual(run_artifact("finalize", str(self.directory))[0], 2)
+        self.assertFalse((self.directory / "manifest.json").exists())
+
+    def test_declared_sample_column_must_exist(self):
+        path = self.directory / "artifact_contract.toml"
+        path.write_text(contract_text().replace('[sample]', '[sample]\nid_column = "missing_id"'), encoding="utf-8")
+        self.finalize()
+        self.assertEqual(run_artifact("verify", str(self.directory), "--full")[0], 1)
+
+    def test_invalid_contract_path_type_fails_cleanly(self):
+        path = self.directory / "artifact_contract.toml"
+        path.write_text(contract_text().replace('path = "data.csv"', 'path = 42'), encoding="utf-8")
+        self.assertEqual(run_artifact("finalize", str(self.directory))[0], 2)
+        self.assertFalse((self.directory / "manifest.json").exists())
+
+    def test_optional_review_refuses_noninteractive_confirmation(self):
+        self.finalize("--request-review")
+        with mock.patch.object(sys, "stdin", io.StringIO()):
+            code, _, _ = run_artifact("approve", str(self.directory), "--reviewer", "tester")
+        self.assertEqual(code, 2)
 
 
 if __name__ == "__main__":

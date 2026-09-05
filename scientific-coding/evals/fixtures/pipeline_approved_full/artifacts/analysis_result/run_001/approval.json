@@ -1,8 +1,0 @@
-{
-  "status": "approved",
-  "artifact_hash": "sha256:1e532484c83dd9e387cfcbdcb0481dbca82e95fa72aec60c337fd04f350d6991",
-  "manifest_hash": "sha256:5ff4d4f28073b532bcbbdec06cd9e51a9afd1c7adc4b1f65a9a5f6bc07e1720a",
-  "reviewed_by": "maintainer",
-  "reviewed_at_utc": "2026-09-04T02:04:43Z",
-  "review_note": "reviewed summary.md and bootstrap CI settings"
-}

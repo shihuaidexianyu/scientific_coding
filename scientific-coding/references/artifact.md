@@ -1,131 +1,53 @@
-# Artifact Contracts and Lineage
+# Data contracts, lineage, and results
 
-Contents: Artifact as the Formal API · Contract Semantics · Lifecycle and Approval · Stable Sample Identity and Exclusions · No Hidden Inputs · Provenance and Randomness · Atomic Production · Manifest Hash Convention · Orchestration
+Use when creating/changing data boundaries, provenance, run handling, or a user-selected review point.
 
-Read this reference whenever a task creates or changes a stage boundary, artifact contract, sample population, approval state, orchestration link, randomness record, or provenance record.
+## Data as the stage interface
 
-## Artifact as the Formal API
+A stage consumes one or more explicitly named datasets and produces described results. Downstream code uses the data contract, not the upstream scientific implementation. Keep stage code linear even when the overall dependency graph branches or joins.
 
-An artifact is the only formal API between stages. A useful artifact is:
+A result worth retaining has data, an annotated contract or equivalent data description, and actual input/config/code provenance. Use existing project conventions when adequate. In a new hash-bound workflow, the bundled tool uses `artifact_contract.toml`, `run.json`, and `manifest.json`; runtime profiles, exclusion ledgers, mappings, and review previews are included when useful. Approval files are optional.
 
-- immutable after approval;
-- versioned by scientific semantics;
-- content-addressable or hashable;
-- self-describing;
-- traceable to code, inputs, config, environment, and randomness.
+The contract describes representation, fields/axes, types, units, missing values, coordinates/time, preprocessing, sample identity, ordering, and population where applicable. Include file formats and concrete loading instructions as described in [readability.md](readability.md). The generic verifier checks declared structure and basic CSV/JSON schemas; domain-specific scientific assumptions remain the producer/loader's responsibility. It cannot establish scientific validity from metadata.
 
-A typical directory contains data, an artifact contract, `manifest.json`, `runtime.json`, `run.json`, an optional exclusion ledger, and review previews. Use [the artifact contract template](../templates/artifact_contract.toml), [manifest template](../templates/artifact_manifest.json), and [run manifest template](../templates/run_manifest.json) as starting points.
+Version the contract when interpretation changes. A new run/config always gets a new output location. A comments-only edit to a tracked contract may preserve the semantic version but changes an identity file, so a newly produced artifact has a new artifact hash. Source comments recorded only through a code hash in run.json change the manifest hash; they need not change the artifact hash when identity files are unchanged. Do not rewrite historical results to add explanations.
 
-## Contract Semantics
+## Multiple inputs and sample transformations
 
-Do not decide compatibility from shape and dtype alone. Record and compare, as applicable:
+Name each input role and contract, including acquisition data, labels, behavioral tables, splits, masks, and model/design artifacts. For joins declare the keys, expected one-to-one/one-to-many/many-to-one cardinality, order, population, and handling of duplicate or missing matches. Do not silently let a join expand the population.
 
-- representation and scientific meaning;
-- dimensions and axis meanings;
-- dtype and missing-value conventions;
-- unit and normalization basis;
-- coordinate system or frame;
-- sampling rate, time origin, and interval convention;
-- preprocessing history that affects interpretation;
-- sample identity, population, and ordering guarantees.
+Preserve sample IDs when identity is unchanged. Emit per-ID reasons for exclusions. For one-to-many splits (trial to windows) and many-to-one aggregation (trials to subject), preserve parent/child mappings with the aggregation/window rule; a retained mapping is not an exclusion. Carry weights when they determine contribution. Report counts with their units and reconcile mappings as appropriate.
 
-Version a contract when any of these meanings changes. A new optional presentation field may not need a semantic version change; a different baseline, unit, time origin, exclusion rule, or sample definition does.
+## Necessary validation and provenance
 
-### `CHANGE_ARTIFACT_CONTRACT`
+Establish each input guarantee at its real trust boundary and reuse it while valid. An unchanged artifact just produced within the same controlled run need not be rehashed at every function call. A separately loaded or potentially modified external artifact must be verified once on entry. Keep the binding to the exact artifact/config/version used; a previous approval alone does not verify newly read bytes.
 
-1. Describe the current and proposed semantics field by field.
-2. Identify every producer and consumer by artifact contract, not Python import.
-3. Decide whether old and new artifacts remain scientifically interchangeable.
-4. If not, create a new contract version and migrate consumers deliberately.
-5. Invalidate approvals tied to changed content or contract hashes.
-6. Test producer output and consumer validation against the new contract.
-7. Report the semantic change and version decision.
+Record actual input roles and hashes/versions, effective config (including overrides), code revision or source hash including dirty changes, environment/library versions, and randomness needed to reproduce the computation. Do not substitute placeholder commits or claimed measurements. Distinguish execution inputs (worker count, scheduler, hardware, temporary paths) from scientific choices; never record credentials. Materialize experiment-defining splits or permutations when necessary to preserve their identities across consumers.
 
-Never overwrite a contract version with new meaning.
+## Production and reruns
 
-### Config-Driven Reruns and Sensitivity Checks
+Write a complete result to a staging directory on the same filesystem, then publish it under a fresh final name. Refuse to overwrite an existing run. Clean up only that run's own staging directory on failure. The public directory must contain the contract, payload, and provenance before it appears complete.
 
-A new config, exclusion threshold, seed, or parameter set produces a **new run directory** (`run_002`, ...). Never edit files inside an approved `run_001` to "update" it: approved content is read-only, even when the new run is destined to supersede it scientifically. The new run's `run.json` records the new config hash and binds the approved input artifact hashes, and the new artifact starts unapproved. Downstream stages and views consume approved runs only, so refreshing a figure from the new results waits for human approval.
+Retain requested deliverables at their declared locations after validation. Demonstrate tamper rejection or invalid inputs using a disposable copy separate from the active results directory; do not leave intentionally corrupt examples mixed with completed results or remove the user's deliverables while cleaning up tests.
 
-## Lifecycle and Approval
+`scientific_artifact.py finalize <dir>` finalizes a staging directory: validates the declared contract metadata, writes hashes and manifest, and returns without waiting for review. The producer owns data invariants; finalization does not repeat row/schema scans or certify scientific validity. `verify --full` checks supported payload schemas when independently auditing or loading external data. Finalization never creates an approval record by default. Stage I/O owns directory publication; finalization alone is not an atomic whole-directory publish. Use the example's narrow I/O boundary instead of duplicating hash machinery in each stage.
 
-Keep execution success separate from scientific acceptance:
+## Optional human review
 
-```text
-producing -> produced -> reviewed -> approved -> frozen
-                    \-> rejected
-producing -> failed
-approved  -> superseded
-```
+Default: a complete, valid result may flow directly downstream. Users inspect data descriptions, exclusions, diagnostics, and summaries as needed; entering a new stage is not a reason to ask again.
 
-A successful run produces an artifact; it does not approve it. Formal downstream stages consume approved artifacts only. Bind approval to the artifact hash. If any tracked content changes, hash verification must fail and the approval becomes invalid.
+Only when the user explicitly selects a pause point, finalize that result with `--request-review`. This records `review_required = true` in its manifest and creates a pending review record. Stop at that selected boundary and present the concrete result to inspect. The optional `approve` command records the human's review against exact hashes; do not pretend that a terminal prompt authenticates a human or that automated verification is scientific acceptance. Never invent a reviewer or claim that the user inspected something they did not inspect.
 
-Approval is a human action. An agent must never create or modify an approval record; it submits an artifact for review with `scripts/scientific_artifact.py finalize` (which writes a `pending_review` record) and the human approves with `scripts/scientific_artifact.py approve`, which verifies hashes, requires an interactive terminal, and demands typed confirmation. Integrity (hashes match) is not authenticity (a human reviewed); the approval ceremony exists to keep them distinct.
+Preserve an existing explicit review requirement until the user changes it. Ordinary results without a review requirement do not need an approval file. Integrity verification works identically with or without approval; reading a review-required result additionally checks its decision once at the consuming boundary. A new input version does not inherit an old decision. Do not introduce review state checks inside scientific functions.
 
-Review previews help a human inspect an artifact but do not become hidden scientific inputs.
+## Hash convention
 
-## Stable Sample Identity and Exclusions
+The tool retains two hashes for compatibility with existing artifacts:
 
-Use stable, meaningful IDs such as `subject03_session02_trial0017`, not row positions. Preserve them through raw, processed, feature, prediction, and statistics artifacts.
+- `manifest.json.files`: relative paths to SHA-256 bytes for every tracked file.
+- `identity_files`: contract and scientific data determining scientific identity. Explicitly select identity files when other metadata mixes scientific content with timestamps; `run.json`/`runtime.json` are execution metadata and excluded by default.
+- `artifact_hash`: canonical JSON of schema version, contract descriptor, and identity file hashes.
+- `manifest_hash`: canonical JSON of the manifest except its own hash, binding remaining provenance too.
+- Optional approval binds both hashes. Manifest and approval themselves are excluded from `files` to avoid cycles.
 
-Whenever a transformation changes the sample set, emit an exclusion ledger with at least:
-
-```text
-sample_id
-reason
-stage
-```
-
-Record each excluded identity, not only aggregate counts. Validate that retained data, exclusion records, and reported totals reconcile.
-
-## No Hidden Inputs
-
-A formal stage's scientific inputs are exactly:
-
-```text
-declared artifact + TOML config + code
-```
-
-Do not make scientific behavior depend on home-directory files, arbitrary environment variables, `latest/`, undocumented caches, the internet, the system clock, or hidden globals. Put acquisition in an explicit `acquire_data.py` stage that materializes a frozen raw artifact; later stages consume that artifact.
-
-## Provenance and Randomness
-
-Every execution should answer: which code, input, config, environment, hardware, and seed produced this output? Record at least:
-
-- run ID and stage name;
-- Git commit and script path;
-- config and input artifact hashes;
-- output artifact hash;
-- Python and relevant library versions;
-- hardware relevant to numerical behavior;
-- seed and deterministic mode where relevant.
-
-If splits, folds, permutations, or mappings define the experiment design, materialize them as artifacts instead of regenerating them ad hoc in each analysis.
-
-## Atomic Production
-
-Write all data and metadata to a temporary run directory. Validate the contract, hashes, and required files there. Atomically rename the complete directory into its final artifact location only after successful completion. A failed process must not leave a directory that looks complete.
-
-Do not modify files under an approved artifact. Produce a new version or run instead.
-
-## Manifest Hash Convention
-
-The bundled linter understands this deterministic convention:
-
-- `manifest.json.files` maps paths relative to the artifact directory to `sha256:<hex>` content hashes.
-- `manifest.json.identity_files` names the contract and scientific payload files that determine artifact identity. Execution metadata such as `run.json` remains integrity-tracked in `files` but is not an identity file.
-- `manifest.json.contract` records the contract identity and hash.
-- `manifest.json.artifact_hash` is the SHA-256 of canonical compact JSON containing `schema_version`, `contract`, and the hashes of `identity_files`.
-- `manifest.json.manifest_hash` is the SHA-256 of canonical compact JSON containing the entire manifest except `manifest_hash` itself. It binds runtime/provenance file hashes without making `run.json.output_artifact_hash` circular.
-- When status is `approved`, `approval.json` must bind both derived hashes.
-
-Do not include `manifest.json` or `approval.json` in `files`, which would create a hash cycle.
-Compute `artifact_hash` after writing the identity files; write that value into `run.json`; then hash all metadata files, finalize `manifest_hash`, and create the approval record only after human review.
-
-This ordering is subtle. Never re-implement it by hand in stage code: `scripts/scientific_artifact.py finalize` is the reference implementation, and `verify` re-checks it.
-
-## Orchestration
-
-Keep orchestration small. It may know pipeline topology, script paths, config paths, input/output contracts, artifact locations, and approval state. It must not know filtering, HFB, classification, thresholds, or other scientific semantics.
-
-Prefer only `run`, `status`, and `approve` operations. Define each scientific branch as a complete, readable TOML pipeline; do not use complex config inheritance to assemble it. Start from [the pipeline template](../templates/pipeline.toml).
+Compute identity hashes, then output artifact hash, then put that hash in run.json, hash remaining metadata, and compute manifest hash. Use the tool rather than reimplementing this order. Metadata verification checks paths, canonical recorded hashes, and any approval binding; `--full` additionally rehashes content **regardless of review status**. Content integrity and requested review are separate concerns.

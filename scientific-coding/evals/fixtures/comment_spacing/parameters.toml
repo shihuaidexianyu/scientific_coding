@@ -1,0 +1,6 @@
+# Scientific parameters for the retained-amplitude summary.
+[analysis]
+# Minimum retained amplitude in microvolts; equality is retained.
+floor_uv = 0.5
+# The hash is literal label text and must remain unchanged.
+label = "sensor #1"

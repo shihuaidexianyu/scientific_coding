@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import scientific_code_lint as lint
+from support import contract_text
 
 
 def run_lint(root: Path, *extra: str) -> tuple[int, list[dict]]:
@@ -64,6 +65,10 @@ class TempProject(unittest.TestCase):
         """Create a convention-conformant artifact directory."""
         directory = self.root / relative
         directory.mkdir(parents=True, exist_ok=True)
+        files = dict(files)
+        contract = lint.tomllib.loads(files["artifact_contract.toml"])
+        if "data" not in contract:
+            files["artifact_contract.toml"] = contract_text(contract["name"])
         for name, content in files.items():
             (directory / name).write_text(content, encoding="utf-8")
         file_map = {name: lint.sha256_file(directory / name) for name in files}
@@ -71,8 +76,8 @@ class TempProject(unittest.TestCase):
         manifest = {
             "schema_version": 1,
             "contract": {
-                "name": "TestDataset",
-                "version": 1,
+                "name": contract["name"],
+                "version": contract["version"],
                 "path": contract_path,
                 "sha256": file_map[contract_path],
             },
@@ -164,7 +169,7 @@ class CliSurfaceTests(TempProject):
     STAGE_HEAD = '"""Stage."""\nimport argparse\n\n\ndef main():\n    p = argparse.ArgumentParser()\n'
     STAGE_TAIL = "    p.parse_args()\n"
 
-    def test_scientific_parameters_are_a_hard_error(self) -> None:
+    def test_scientific_parameters_are_an_advisory_warning(self) -> None:
         self.write(
             "stages/main_analysis.py",
             self.STAGE_HEAD
@@ -175,7 +180,7 @@ class CliSurfaceTests(TempProject):
         )
         issues = [i for i in self.issues(*NO_ARTIFACTS) if i["code"] == "SC002"]
         self.assertTrue(issues)
-        self.assertEqual(issues[0]["severity"], "error")
+        self.assertEqual(issues[0]["severity"], "warning")
         self.assertIn("seed", issues[0]["message"])
 
     def test_operational_parameters_are_a_warning(self) -> None:
@@ -315,6 +320,7 @@ class HeuristicWarningTests(TempProject):
             "    except Exception:\n        pass\n",
         )
         codes = self.codes(*NO_ARTIFACTS)
+
         # infra/fetch.py is not a stage/view, so only the stage occurrence counts
         self.assertIn("SC106", codes)
         infra_hits = [
@@ -362,7 +368,7 @@ class DocstringContractTests(TempProject):
         )
         self.assertNotIn("SC108", self.codes(*NO_ARTIFACTS))
 
-    def test_complete_module_docstring_waives_function_checks(self) -> None:
+    def test_module_summary_does_not_replace_function_contract(self) -> None:
         self.write(
             self.STAGE,
             '"""Compute trial features from ProcessedDatasetV1.\n\n'
@@ -371,7 +377,7 @@ class DocstringContractTests(TempProject):
             "Output artifact: FeatureMatrixV1. Mutation: none, no side effects.\n"
             '"""\n\n\ndef compute_features(data, config):\n    return data\n',
         )
-        self.assertNotIn("SC108", self.codes(*NO_ARTIFACTS))
+        self.assertIn("SC108", self.codes(*NO_ARTIFACTS))
 
     def test_missing_contract_warns(self) -> None:
         self.write(
@@ -488,7 +494,7 @@ class ArtifactIntegrityTests(TempProject):
         (directory / "approval.json").write_text("{}", encoding="utf-8")
         self.assertIn("SC004", self.codes())
 
-    def test_unapproved_input_is_sc005(self) -> None:
+    def test_missing_input_binding_is_sc005(self) -> None:
         self.make_artifact("artifacts/raw/run_001", self.FILES, approved=False)
         self.write(
             "run.json",
@@ -521,12 +527,11 @@ class ArtifactIntegrityTests(TempProject):
 
     def test_tampered_input_payload_only_detected_in_full_mode(self) -> None:
         directory = self.make_artifact("artifacts/raw/run_001", self.FILES, approved=True)
-        self.write(
-            "run.json",
-            json.dumps(
-                {"input_artifacts": [{"path": "artifacts/raw/run_001"}]}
-            ),
-        )
+        manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+        self.write("run.json", json.dumps({"input_artifacts": [{
+            "path": "artifacts/raw/run_001",
+            "artifact_hash": manifest["artifact_hash"], "manifest_hash": manifest["manifest_hash"],
+        }]}))
         (directory / "data.csv").write_text("id,x\n1,9.9\n", encoding="utf-8")
         self.assertNotIn("SC005", self.codes())
         self.assertIn("SC005", self.codes("--full-artifact-checks"))
@@ -702,6 +707,44 @@ class SkillCopyIgnoreTests(TempProject):
             '"""Shared helpers."""\n',
         )
         self.assertEqual(self.issues("--no-artifact-checks"), [])
+
+
+
+class BoundaryRegressionTests(TempProject):
+    def test_invalid_scope_is_an_error_in_json_mode(self):
+        self.write("scientific-code.toml", '[scope]\nstage_roots = 42\n')
+        self.write("stages/analysis.py", 'print("example")\n')
+        code, issues = run_lint(self.root)
+        self.assertEqual(code, 2)
+        self.assertIn("SC000", {i["code"] for i in issues})
+
+    def test_syntax_error_reports_sc000_without_crashing(self):
+        self.write("stages/broken.py", "def broken(:\n")
+        code, issues = run_lint(self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("SC000", {i["code"] for i in issues})
+
+    def test_two_projects_use_their_own_scopes(self):
+        for name, directory in (("a", "research"), ("b", "science")):
+            self.write(f"{name}/scientific-code.toml", f'[scope]\nstage_roots = ["{directory}"]\n')
+            self.write(f"{name}/{directory}/step.py", 'import requests\nrequests.get("https://example.invalid")\n')
+        hits = [i for i in self.issues() if i["code"] == "SC008"]
+        self.assertEqual({i["path"] for i in hits}, {"a/research/step.py", "b/science/step.py"})
+
+    def test_custom_artifact_root_finds_missing_manifest(self):
+        self.write("scientific-code.toml", '[scope]\nartifact_roots = ["results"]\n')
+        self.write("results/run_001/artifact_contract.toml", contract_text())
+        self.assertIn("SC004", self.codes())
+
+    def test_operational_cli_warning_is_suppressible(self):
+        self.write("stages/main_analysis.py", '# scientific-code: allow SC002 -- project requires these execution flags\nimport argparse\np = argparse.ArgumentParser()\np.add_argument("--config")\np.add_argument("--log-level")\np.add_argument("--output-dir")\n')
+        self.assertNotIn("SC002", self.codes())
+
+    def test_default_finalized_input_needs_binding_but_no_approval(self):
+        directory = self.make_artifact("artifacts/raw/run_001", ArtifactIntegrityTests.FILES)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        self.write("run.json", json.dumps({"input_artifacts": [{"path": "artifacts/raw/run_001", "artifact_hash": manifest["artifact_hash"], "manifest_hash": manifest["manifest_hash"]}]}))
+        self.assertEqual(self.issues("--full-artifact-checks"), [])
 
 
 if __name__ == "__main__":

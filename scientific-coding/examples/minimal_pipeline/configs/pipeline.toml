@@ -1,0 +1,23 @@
+# 新运行目录的父位置，相对示例项目根目录解析。
+run_root = "artifacts"
+
+# 采集科学参数文件；以下阶段配置路径均相对项目根目录。
+acquire_config = "configs/acquire_data.toml"
+
+# 预处理使用的样本排除规则文件。
+preprocess_config = "configs/preprocess.toml"
+
+# 分析目标量与重采样参数文件。
+analyze_config = "configs/analyze.toml"
+
+# 空字符串表示连续执行；仅在用户要求人工暂停时填写阶段名。
+# 允许值为 acquire_data、preprocess、analyze。
+pause_after = ""
+
+# 可选：复用确切的 RawTrials 产物，例如用户完成指定原始数据评审后。
+# 空字符串表示重新采集；原始与预处理产物不能同时指定。
+raw_artifact = ""
+
+# 可选：复用确切的 ProcessedTrials 产物，同时跳过采集与预处理。
+# 若该外部产物有用户指定的评审要求，在加载入口检查一次。
+processed_artifact = ""

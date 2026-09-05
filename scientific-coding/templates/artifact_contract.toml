@@ -1,33 +1,131 @@
+# 此信号结果示例的科学身份。
 name = "ProcessedDataset"
-version = 1
-description = "One baseline-corrected signal tensor per retained trial."
 
+# 科学解释改变时更新契约版本。
+version = 1
+
+# 每个保留试次对应一个完成基线校正的信号张量切片。
+description = "在每个试次和通道内扣除基线均值后的试次信号。"
+
+# 存储方式与数组含义。
 [data]
+
+# 相对产物目录的文件路径。
 path = "signals.npy"
+
+# NumPy 的磁盘数组格式。
+format = "npy"
+
+# 数值表示信号，不是功率或归一化比值。
 representation = "baseline_corrected_signal"
+
+# 按保存顺序声明数组轴，实际尺寸随运行记录。
 dimensions = ["trial", "channel", "time"]
+
+# 每个信号值为 32 位浮点数。
 dtype = "float32"
+
+# 数组数值的物理单位。
 unit = "microvolt"
+
+# 本表示不允许缺失或非有限信号值。
 missing_value = "not_allowed"
 
+# 通道及相对事件时间的解释。
 [coordinates]
-channel_frame = "acquisition_channel_order"
+
+# 通道顺序与配套通道表的采集顺序一致。
+channel_frame = "按 channels.csv 行顺序对应第 1 轴"
+
+# 每秒等间隔采样的次数。
 sampling_rate_hz = 1000
+
+# 作为时间零点的事件。
 time_origin = "stimulus_onset"
+
+# 首个包含的采样时刻，相对事件的时间，单位为毫秒。
 start_ms = -200
+
+# 不包含的时间上界，单位为毫秒。
 end_ms = 800
+
+# 区间左闭右开。
 interval = "left_closed_right_open"
 
+# 试次身份及其与数组第一轴的对应关系。
 [sample]
-identity = "trial"
-id_column = "sample_id"
-ordering = "sample_id_ascending"
-population = "trials passing the declared preprocessing exclusions"
 
+# 第一轴的每个位置代表一个保留试次。
+identity = "trial"
+
+# 与第一轴一一对应的配套 ID 表。
+id_file = "samples.csv"
+
+# 配套表中保存稳定 ID 的列名。
+id_column = "sample_id"
+
+# ID 表与数组行同步按 ID 升序排列。
+ordering = "sample_id_ascending"
+
+# 输出所代表的科学总体。
+population = "通过已声明预处理排除规则的试次"
+
+# 影响科学解释的处理历史。
 [preprocessing]
-summary = "Baseline mean from -200 ms to 0 ms is subtracted per trial and channel."
+
+# 基线扣除采用的具体操作和时间窗。
+summary = "在每个试次和通道内扣除 [-200, 0) 毫秒窗口的均值。"
+
+# 记录被移除的 ID 及原因；保留 ID 沿用上游身份。
 exclusion_ledger = "excluded_samples.parquet"
 
+# 该结果的读取方式和内存使用说明。
+[reading]
+
+# 不适合完整加载时采用 mmap_mode='r'。
+example = "numpy.load(artifact_dir / 'signals.npy', mmap_mode='r')"
+
+# 读取后数组的轴含义、单位及 ID 对齐方式。
+in_memory = "float32 数组，轴为 [trial, channel, time]，单位为微伏；第 0 轴对应 samples.csv 顺序"
+
+# 消费方应匹配科学含义及契约版本。
 [compatibility]
+
+# 此示例接口要求确切匹配声明的语义版本。
 consumers_require_exact_version = true
 
+# 配套表参与科学身份定义，应与数据共同保留。
+[companions.samples]
+
+# UTF-8 CSV，每行对应信号数组第 0 轴的一项。
+path = "samples.csv"
+
+# 稳定字符串 sample_id 不缺失、不重复，与张量同步按 ID 升序排列。
+schema = "sample_id 为无量纲字符串，与 signals.npy 第 0 轴一一对应"
+
+# 读取后得到按张量顺序排列的字符串记录，无须转换数值。
+reading = "list(csv.DictReader((artifact_dir / 'samples.csv').open(newline='', encoding='utf-8')))"
+
+# 通道身份赋予第 1 轴具体测量含义。
+[companions.channels]
+
+# UTF-8 CSV 的行顺序就是通道采集顺序。
+path = "channels.csv"
+
+# 稳定唯一的 channel_id 与可读 channel_label 均为非缺失、无量纲字符串。
+schema = "channel_id、channel_label 为无量纲字符串，与 signals.npy 第 1 轴一一对应"
+
+# 读取后保留通道记录顺序，用于选择张量通道或添加标签。
+reading = "list(csv.DictReader((artifact_dir / 'channels.csv').open(newline='', encoding='utf-8')))"
+
+# 被排除样本独立于保留样本身份表保存。
+[companions.exclusions]
+
+# Parquet 表每行代表一个被排除样本；未排除时为空表。
+path = "excluded_samples.parquet"
+
+# 字段均为非缺失、无量纲字符串；ID 可关联原始输入且不出现在 samples.csv。
+schema = "sample_id、reason、stage 为无量纲字符串；沿用上游顺序，仅包含排除 ID"
+
+# 读取后返回数据框，实际项目须提供兼容的 Parquet 引擎。
+reading = "pandas.read_parquet(artifact_dir / 'excluded_samples.parquet')"

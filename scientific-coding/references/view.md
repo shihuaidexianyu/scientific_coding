@@ -1,50 +1,13 @@
-# Scientific Views
+# Scientific views
 
-Read this reference for `CREATE_VIEW`: figures, tables, reports, and exploratory notebooks.
+Use for figures, tables, reports, and exploratory notebooks.
 
-## Boundary
+A formal view presents described stage results. Default to computing exclusions, normalization, fitting, intervals, and other scientific quantities in an analysis stage, then rendering the retained values. Views may select what to display without changing the analyzed population, reshape/sort for layout, map labels, set axes/styles, and add clearly presented axis transformations or visual jitter.
 
-A view is a presentation function over an approved artifact:
+State what the figure communicates and trace it to the exact source result. The source does not need human approval by default. Verify separately loaded external data once at the view's I/O boundary; do not recheck unchanged results just produced by the same controlled run. Honor only user-selected review points.
 
-```text
-view = g(approved artifact)
-```
+If the user explicitly requests one file combining calculation and rendering, respect that layout: separate a named analysis section from presentation, document and retain derived results and exclusions, and make the deliberate boundary visible. Do not silently hide scientific work in a plotting helper. The SC109 heuristic can be justified with a narrow directive for this explicit combined-file choice.
 
-It does not participate in the formal stage dataflow and must not produce hidden scientific state that later stages consume.
+Record source identity/hash, view code/config, and output identity when needed for traceability. Explain meaningful operations and intermediate data using [readability.md](readability.md). A function called `load_result` must actually implement the documented input contract; naming it `load_approved_result` is not verification.
 
-## Workflow
-
-1. Identify the approved source artifact and verify its hash/approval.
-2. State exactly what the figure, table, or report communicates.
-3. Enumerate every requested transformation.
-4. Apply the deletion test: if removing the plotting or formatting library leaves an operation with scientific meaning, that operation belongs in an analysis stage.
-5. Keep only presentation transformations in the view.
-6. Record figure provenance: source artifact identity/hash, view script and code revision, relevant display config, and output file hash.
-
-## Allowed Presentation Work
-
-- filtering solely to choose what is displayed, without changing the analyzed population;
-- sorting, pivoting, and reshaping for layout;
-- label mapping;
-- colors, styles, annotations, and axes;
-- visual jitter that is not used analytically;
-- axis transformations clearly represented to the reader.
-
-## Scientific Work That Must Move Upstream
-
-- outlier removal or sample exclusion;
-- normalization or baseline correction;
-- bootstrap confidence intervals;
-- model fitting;
-- group-level statistics;
-- permutation tests;
-- any transformation whose result could change a scientific conclusion.
-
-When such work is requested inside `figure.py`, add or modify an analysis stage that produces the derived values as an approved artifact, then make the figure consume those values. Do not silently perform the calculation in the view.
-
-This boundary holds regardless of where the work is requested. If the user explicitly asks for outlier removal, intervals, fitting, or normalization "in the figure file", perform the computation in an analysis stage anyway, have the figure read the derived artifact, and say so in the completion report. User instruction never moves scientific computation downstream into a view; the linter's SC109 warning flags common statistical patterns found in view files.
-
-## Notebooks
-
-Use notebooks for exploration and temporary visualization. A notebook must not remain the only formal implementation of preprocessing, analysis, or validation. Once an exploratory method becomes part of the study, rewrite it as a readable stage `.py` file and preserve the notebook only as exploration if it remains useful.
-
+Notebooks are useful for exploration. When an exploratory method becomes a formal study step, give it a maintained, reproducible implementation; preserve an existing notebook workflow when requested and keep scientific operations, configuration, and data meaning explicit.

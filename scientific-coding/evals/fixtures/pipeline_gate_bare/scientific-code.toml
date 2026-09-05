@@ -1,5 +1,0 @@
-[scope]
-stage_roots = ["stages"]
-view_roots = ["figures"]
-artifact_roots = ["artifacts"]
-infrastructure_roots = ["stages/common.py"]

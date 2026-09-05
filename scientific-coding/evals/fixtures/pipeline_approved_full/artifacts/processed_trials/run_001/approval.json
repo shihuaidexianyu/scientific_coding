@@ -1,8 +1,0 @@
-{
-  "status": "approved",
-  "artifact_hash": "sha256:e344d587c468e1fe241be3554a00ba8e8f34bbbf21ee2cf4dfd07a11fdf039e2",
-  "manifest_hash": "sha256:c14fe08044bfe17214d88d7f21c13d935afe2b0d5ff09c6bb3fc6548769dc741",
-  "reviewed_by": "maintainer",
-  "reviewed_at_utc": "2026-09-04T02:04:17Z",
-  "review_note": "checked exclusion ledger rows against raw data"
-}

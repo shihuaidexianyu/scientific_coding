@@ -6,13 +6,13 @@ Read this reference for `CREATE_STAGE`, `MODIFY_STAGE`, or `CREATE_BRANCH`.
 
 ## Stage Boundary
 
-A stage is one coherent scientific procedure that maps a declared input artifact and explicit TOML configuration to a declared output artifact:
+A stage is one coherent scientific procedure that maps named input datasets and explicit configuration to a declared output artifact:
 
 ```text
-A(i+1) = S(i)(A(i), C(i))
+outputs = stage(named_inputs, effective_config)
 ```
 
-Create an artifact boundary only when the output is worth independently reviewing, approving, reusing downstream, or retaining as a natural restart point. Do not split a method merely because the source file is long.
+Create an artifact boundary only when the output is worth independently reviewing, reusing downstream, or retaining as a natural restart point. Do not split a method merely because the source file is long.
 
 Stage code may use stable reusable libraries, but it must not import another stage implementation. If two stages need the same value, carry it through an artifact contract or repeat a small transparent calculation when that better preserves auditability.
 
@@ -34,24 +34,41 @@ Perform these decisions in order:
 2. Identify the exact input artifact contract, including sample identity and scientific semantics.
 3. Define the output artifact contract before implementation.
 4. List the scientific transformations in execution order.
-5. Decide whether this output deserves a new artifact and human-approval boundary.
+5. Decide which outputs deserve retention; add a human pause only if the user requested it.
 6. Sketch a linear top-level narrative.
 7. Implement the stage in one file by default.
 8. Extract only functions named for genuine scientific concepts or clear I/O boundaries.
-9. Produce artifact, runtime, and run-provenance metadata atomically.
-10. Review the result for hidden transformations, hidden inputs, mutation, and semantic jumps.
+9. Publish the retained result and required provenance atomically; include runtime/profile metadata when useful.
+10. Review local explanation coverage and remove redundant checks as described in [readability.md](readability.md).
 
 A preferred top-level shape is:
 
 ```python
 def main() -> None:
-    config = load_config(...)
-    input_artifact = load_approved_artifact(...)
+    """按顺序执行本阶段。
 
+    参数：无；配置路径和输入位置由项目入口确定。
+
+    处理逻辑：读取输入、筛选、对齐、计算特征并发布结果。
+
+    产物：不返回值；写入项目契约声明的数据和来源文件。
+    实际生成时必须在文件头补明具体输入、输出和 TOML 路径。
+    """
+
+    # 在入口读取配置和外部数据，一次建立所需保证。
+    config = load_config(...)
+    input_artifact = load_input_artifact(...)
+
+    # 保留有效试次，同时记录被排除样本的身份和原因。
     valid_trials, exclusions = remove_invalid_trials(input_artifact, config)
+
+    # 将保留试次对齐到声明的时间和坐标参考。
     aligned_trials = align_trials(valid_trials, config)
+
+    # 计算具有明确科学含义的特征，并说明其数组轴。
     features = compute_features(aligned_trials, config)
 
+    # 将完整数据与来源记录发布到新的运行目录。
     write_artifact_atomically(features, exclusions, ...)
 ```
 
@@ -59,21 +76,15 @@ The exact functions should follow the method, not this example. Avoid opaque ent
 
 ## Scientific Function Contracts
 
-For each key scientific function, keep a nearby docstring that states:
-
-- purpose;
-- input semantics, shape, dtype, unit, coordinate frame, and time reference where applicable;
-- ordered transformation;
-- output semantics and shape;
-- mutation and side effects.
+For every defined function, provide a Chinese docstring/documentation comment that the language service can display when the user hovers over a call. In Python it must be the first statement inside the function. Separate purpose, parameters, processing logic, products and side effects with blank lines. Explain each parameter and each returned item in its own spaced paragraph, including actual fields/axes, types, units, path bases, defaults and relevant assumptions. Explain the ordered processing rather than merely naming the algorithm. The file header separately names inputs, outputs, processing flow and associated TOML files. Follow [readability.md](readability.md) and [the header template](../templates/stage_header.md).
 
 Prefer scientific names such as `compute_hfb`, `align_trials`, or `run_permutation_test`. Keep execution helpers visibly separate. Avoid `utils.py`, `helpers.py`, `misc.py`, and `common.py` unless the code is genuinely stable infrastructure rather than study logic.
 
 ## Configuration and CLI
 
-Put human-authored scientific parameters in a self-contained, flat-ish TOML file. Do not use inheritance, template chains, hidden overrides, or deep resolver behavior. Encode units in keys when practical, such as `window_ms`, `sampling_rate_hz`, and `timeout_s`.
+For new projects put scientific parameters in an annotated, self-contained TOML file. Preserve an existing configuration system unless migration is requested; capture the effective config and overrides. Explain every section/key with a preceding comment separated from prior code by a blank line. Encode units in keys when practical, such as `window_ms`, `sampling_rate_hz`, and `timeout_s`.
 
-A stage CLI should normally accept only a config path. Status and approval commands belong to a minimal orchestrator. Do not expose the study's parameter space as many CLI flags.
+A stage CLI should normally accept only a config path. Status and approval commands belong to a minimal orchestrator. Respect a user-specified CLI while recording effective scientific choices; avoid adding a large CLI surface by default.
 
 ## `CREATE_BRANCH`
 
@@ -101,29 +112,7 @@ Before editing, establish the current behavior from code, config, contract, and 
 
 If it affects artifact semantics, version the contract rather than silently mutating it. Keep unrelated refactoring out of the patch so the scientific change remains reviewable.
 
-Report:
-
-```text
-Before
-------
-<scientific behavior>
-
-After
------
-<scientific behavior>
-
-Scientific semantic change
---------------------------
-<what changed and why, or none>
-
-Artifact contract change
-------------------------
-yes / no
-
-Version bump required
----------------------
-yes / no — <reason>
-```
+Report the resulting behavior, material scientific changes, contract/version implications, and validation in concise prose. Omit fields that do not apply; no fixed review form is required.
 
 ## Testing
 

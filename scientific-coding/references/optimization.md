@@ -8,7 +8,7 @@ Read this reference for `OPTIMIZE_STAGE`.
 
 Optimize **time to scientific answer**, not kernel benchmark score, CPU/GPU utilization, minimum RAM, or minimum lines of code. Preserve scientific meaning and auditability ahead of speed.
 
-No representative profiling evidence means no optimization implementation. If measurement cannot be run in the available environment, gather existing representative evidence or stop with a measurement plan; do not guess at a hotspot.
+Use representative profiling before adding performance complexity. If the target environment is unavailable, use existing measurements or a credible reduced workload and label its limits; do not fabricate a hotspot or speedup. Respect an explicitly requested prototype while distinguishing it from a measured improvement.
 
 ## Required Workflow
 
@@ -32,7 +32,7 @@ When the decision at step 5–6 is to optimize, carry it through: an implemented
 
 ## Research Latency
 
-Prefer changes that cross a human-feedback boundary:
+Consider total repeated-run cost as well as single-run latency. A five-minute saving repeated hundreds of times can justify a transparent change. Prefer changes that cross a human-feedback boundary:
 
 | Runtime | Research cadence |
 |---|---|
@@ -87,7 +87,7 @@ S(N) = 1 / ((1 - p) + p / N)
 
 If only 20% is parallelizable, even infinitely many workers cannot exceed 1.25x end-to-end speedup. Reject locks, queues, shared memory, process managers, or worker lifecycle complexity that cannot earn a meaningful pipeline gain.
 
-When the bound rules out the requested mechanism, decline the mechanism and deliver the bottleneck fix or a `DO NOT OPTIMIZE` verdict instead. Analysis that concludes "this cannot pay" and then implements it anyway is a failure: the estimate exists to decide, not to decorate. A user request for a specific mechanism does not override the measured bound.
+When the bound rules out the requested mechanism, decline the mechanism and deliver the bottleneck fix or a `DO NOT OPTIMIZE` verdict instead. Analysis that concludes "this cannot pay" and then implements it anyway is a failure: the estimate exists to decide, not to decorate. Explain the measured limit. If the user explicitly values another outcome or requests a prototype despite it, respect that scope and report the tradeoff without claiming unsupported speedup.
 
 Keep scientific computation independent of execution machinery:
 

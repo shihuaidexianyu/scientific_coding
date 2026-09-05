@@ -1,0 +1,125 @@
+# 保留试次对比量结果的科学身份。
+name = "AnalysisResult"
+
+# 版本涵盖目标量、单位、分位数约定和样本含义。
+version = 1
+
+# 该对比量描述保留的合成试次，不代表参与者总体。
+description = "处理组减对照组的平均振幅差，以及各条件内重采样得到的分位数 bootstrap 区间。"
+
+# 标量结果的保存方式和解释。
+[data]
+
+# 含估计值、样本量和重采样设置的 JSON 对象。
+path = "result.json"
+
+# 读取 JSON 时保留标量数值类型。
+format = "json"
+
+# 目标量为保留试次中处理组与对照组的均值差。
+representation = "retained_trial_mean_contrast"
+
+# 只有一个对比量，各字段区分估计值及相关元数据。
+dimensions = ["contrast"]
+
+# 数值和文本字段的具体类型见下方声明。
+dtype = "mixed_record"
+
+# 均值、差值及区间使用微伏；计数、种子和概率字段无量纲。
+unit = "混合单位；_uv 字段使用微伏，计数、种子和概率无量纲"
+
+# 所有声明字段均存在，数值估计不得为非有限数。
+missing_value = "not_allowed"
+
+# JSON 标量字段的类型声明。
+[data.columns]
+
+# 保留的独立合成对照试次数。
+n_control = "int64"
+
+# 保留的独立合成处理试次数。
+n_treatment = "int64"
+
+# 对照组算术均值，单位为微伏。
+control_mean_uv = "float64"
+
+# 处理组算术均值，单位为微伏。
+treatment_mean_uv = "float64"
+
+# 处理组均值减对照组均值，单位为微伏。
+difference_uv = "float64"
+
+# 中心分位数区间下端点，按向下取整索引选取，单位为微伏。
+ci_low_uv = "float64"
+
+# 中心分位数区间上端点，索引不超过最后一次排序结果，单位为微伏。
+ci_high_uv = "float64"
+
+# 请求的中心区间概率。
+confidence_level = "float64"
+
+# 蒙特卡洛 bootstrap 重复次数，不是独立观测数量。
+n_bootstrap = "int64"
+
+# 重采样使用的随机数种子。
+seed = "int64"
+
+# 对已实现的估计方法和重采样方式的文字说明。
+method = "string"
+
+# 结果汇总上游样本身份，不虚构 sample_id 列。
+[sample]
+
+# 保留试次总体上的一个处理减对照对比量。
+identity = "条件间对比量"
+
+# 标量由字段名标识，不依赖行顺序。
+ordering = "按名称标识的标量字段"
+
+# 推断范围限于筛选后的指定合成试次模型。
+population = "保留的独立合成试次，在各条件内分别重采样"
+
+# 输入试次到所报告对比量的贡献映射。
+[lineage]
+
+# CSV 行包含 trial_id、condition、contrast_id 和带符号的均值权重。
+path = "aggregation.csv"
+
+# 多个试次汇总成一个估计值；正权重对应处理组贡献。
+meaning = "试次对应到 treatment_minus_control；weight 为 +1/n_treatment 或 -1/n_control"
+
+# UTF-8 CSV 含一行表头，每个保留试次对应一行贡献记录。
+format = "csv"
+
+# ID 与 ProcessedTrials 一一对应并沿用其顺序，各字段均不缺失。
+alignment = "trial_id 关联保留试次，先 control 后 treatment；每试次一行，无缺失值"
+
+# 读取字符串字段后将 weight 转为 float；乘以上游 amplitude_uv 得到微伏贡献。
+reading = "list(csv.DictReader((artifact_dir / 'aggregation.csv').open(newline='', encoding='utf-8')))"
+
+# 完成 weight 数值转换后的贡献表字段类型。
+[lineage.columns]
+
+# 稳定的输入试次标识。
+trial_id = "string"
+
+# 来源条件，值为 control 或 treatment。
+condition = "string"
+
+# 所有行对应同一目标估计值 treatment_minus_control。
+contrast_id = "string"
+
+# 有限、无量纲的带符号系数；sum(weight * 上游 amplitude_uv) 为未舍入的微伏均值差。
+weight = "float64"
+
+# 具体的读取方式和使用说明。
+[reading]
+
+# 读取标量字典；配套 summary.md 以文字呈现同一组数值。
+example = "json.loads((artifact_dir / 'result.json').read_text(encoding='utf-8'))"
+
+# 绘图直接使用这些结果，无须重新拟合、排除样本或计算区间。
+in_memory = "标量字典，含微伏均值、差值与区间，以及试次数、B、种子、区间概率和方法说明"
+
+# 本阶段汇总试次；aggregation.csv 保留每个试次与对比量的关系。
+stage_change = "试次振幅汇总为组均值与一个均值差 bootstrap 区间，试次集合与 ProcessedTrials 一致。"

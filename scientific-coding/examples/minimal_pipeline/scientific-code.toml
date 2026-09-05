@@ -1,5 +1,14 @@
+# 以下路径相对本示例项目根目录。
 [scope]
+
+# 科学方法的实现文件。
 stage_roots = ["stages"]
+
+# 已保存结果的展示文件。
 view_roots = ["figures"]
+
+# 流水线各次运行的新结果及其结构说明。
 artifact_roots = ["artifacts"]
-infrastructure_roots = ["stages/common.py"]
+
+# 文件读写与流程编排独立于科学变换。
+infrastructure_roots = ["artifact_io.py", "pipeline.py"]

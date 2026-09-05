@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+import csv
+import math
 import hashlib
 import io
 import json
@@ -71,7 +73,7 @@ STAGE_STEM = re.compile(
 )
 VIEW_STEM = re.compile(r"^(figure|fig|plot|table|report)(?:_|$)")
 SUPPRESSION = re.compile(
-    r"^\s*#\s*scientific-code:\s*allow\s+(SC1\d{2})\s*--\s*(\S.*)$",
+    r"^\s*#\s*scientific-code:\s*allow\s+(SC(?:1\d{2}|002))\s*--\s*(\S.*)$",
     re.MULTILINE,
 )
 VIEW_SCIENTIFIC_COMPUTATION = re.compile(
@@ -149,7 +151,7 @@ NETWORK_PREFIXES = (
 
 # CLI argument names that look like scientific parameters rather than
 # operational flags. Used to decide whether a large CLI surface is a hard
-# error (scientific parameters exposed) or a warning (merely busy).
+# scientific-parameter warning or an operational CLI warning.
 SCIENTIFIC_ARG_NAME = re.compile(
     r"^(alpha|beta|sigma|gamma|lambda_|epsilon|tol|tolerance|seed|split|"
     r"fold|folds|window|threshold|cutoff|normalization|normalize|baseline|"
@@ -202,34 +204,7 @@ class ScopeConfig:
 
 
 def load_scope_config(root: Path) -> ScopeConfig:
-    config_path = root / "scientific-code.toml"
-    if not config_path.is_file():
-        # A monorepo may nest self-contained scientific projects (each with
-        # its own scientific-code.toml) under an outer root that has none.
-        # Scope checks then classify by file content alone, which mislabels
-        # nested stages. Fall back to the nearest scientific-code.toml in any
-        # descendant directory so nested projects keep their own scope.
-        candidates = sorted(
-            path
-            for path in root.rglob("scientific-code.toml")
-            if path.is_file() and not is_ignored(path, root)
-        )
-        if candidates:
-            return load_scope_config(candidates[0].parent)
-        return ScopeConfig()
-    config: ScopeConfig = _parse_scope_config(config_path)
-    if config != ScopeConfig():
-        return config
-    # The root config exists but declares nothing usable; still allow a
-    # nested project config to take over, for the same monorepo reason.
-    candidates = sorted(
-        path
-        for path in root.rglob("scientific-code.toml")
-        if path.is_file() and not is_ignored(path, root) and path != config_path
-    )
-    if candidates:
-        return load_scope_config(candidates[0].parent)
-    return config
+    return scope_binding(root).config
 
 
 @dataclass(frozen=True)
@@ -249,70 +224,38 @@ class ScopeBinding:
         return is_under_roots(path, self.path_root, roots)
 
 
-def scope_binding(root: Path) -> ScopeBinding:
-    config_path = root / "scientific-code.toml"
-    if config_path.is_file() and _parse_scope_config(config_path) != ScopeConfig():
-        return ScopeBinding(path_root=root, config=_parse_scope_config(config_path))
-    candidates = sorted(
-        path
-        for path in root.rglob("scientific-code.toml")
-        if path.is_file() and not is_ignored(path, root)
-    )
-    if candidates:
-        project_root = candidates[0].parent
-        return ScopeBinding(path_root=project_root, config=_parse_scope_config(candidates[0]))
-    return ScopeBinding(path_root=root, config=ScopeConfig())
+def scope_binding(root: Path, path: Path | None = None) -> ScopeBinding:
+    """Use the nearest owning config for a file, never a sibling project's config."""
+
+    # Each nested project owns its paths; a monorepo is not one global scope.
+    current = path.parent if path is not None else root
+    while stays_within(current, root):
+        config_path = current / "scientific-code.toml"
+        if config_path.is_file():
+            config = _parse_scope_config(config_path)
+            if config != ScopeConfig():
+                return ScopeBinding(current, config)
+        if current == root:
+            break
+        current = current.parent
+    return ScopeBinding(root, ScopeConfig())
 
 
 def _parse_scope_config(config_path: Path) -> ScopeConfig:
     if tomllib is None:
-        print(
-            "scientific-code lint: scientific-code.toml found but tomllib is "
-            "unavailable (Python < 3.11); ignoring the project scope config.",
-            file=sys.stderr,
-        )
-        return ScopeConfig()
-    try:
-        with config_path.open("rb") as stream:
-            data = tomllib.load(stream)
-    except (OSError, tomllib.TOMLDecodeError) as error:
-        print(
-            f"scientific-code lint: could not parse scientific-code.toml: {error}",
-            file=sys.stderr,
-        )
-        return ScopeConfig()
+        raise RuntimeError("scientific-code requires Python 3.11+ for TOML")
+    with config_path.open("rb") as stream:
+        data = tomllib.load(stream)
     scope = data.get("scope", {})
     if not isinstance(scope, dict):
-        return ScopeConfig()
-    if tomllib is None:
-        print(
-            "scientific-code lint: scientific-code.toml found but tomllib is "
-            "unavailable (Python < 3.11); ignoring the project scope config.",
-            file=sys.stderr,
-        )
-        return ScopeConfig()
-    try:
-        with config_path.open("rb") as stream:
-            data = tomllib.load(stream)
-    except (OSError, tomllib.TOMLDecodeError) as error:
-        print(
-            f"scientific-code lint: could not parse scientific-code.toml: {error}",
-            file=sys.stderr,
-        )
-        return ScopeConfig()
-    scope = data.get("scope", {})
-    if not isinstance(scope, dict):
-        return ScopeConfig()
+        raise ValueError(f"{config_path}: scope must be a table")
 
+    # Interpret directory roles once from the owning project's configuration.
     def roots(key: str) -> tuple[str, ...]:
         value = scope.get(key, [])
-        if not isinstance(value, list):
-            return ()
-        return tuple(
-            str(item).replace("\\", "/").strip("/")
-            for item in value
-            if isinstance(item, str) and item.strip("/")
-        )
+        if not isinstance(value, list) or any(not isinstance(x, str) for x in value):
+            raise ValueError(f"{config_path}: {key} must be an array of paths")
+        return tuple(item.replace("\\", "/").strip("/") for item in value)
 
     return ScopeConfig(
         stage_roots=roots("stage_roots"),
@@ -376,6 +319,7 @@ def is_ignored(path: Path, root: Path) -> bool:
         parts = path.parts
     if any(part in IGNORED_DIRECTORIES for part in parts):
         return True
+
     # Installed skill copies (.claude/skills, .agents/skills) are agent
     # scaffolding, not project code: they ship their own worked example,
     # which must not be linted as part of the host project.
@@ -411,6 +355,7 @@ def is_stage_file(path: Path, binding: ScopeBinding, text: str) -> bool:
     lowered_parts = {part.lower() for part in relative.parts[:-1]}
     if lowered_parts & {"test", "tests", "template", "templates"}:
         return False
+
     # An explicit in-file marker is the strongest signal and always wins.
     if contains_marker(text, "stage"):
         return True
@@ -473,7 +418,7 @@ def git_changed_python_files(root: Path, base_ref: str | None = None) -> set[Pat
     else:
         diff_target = "HEAD"
     commands = [
-        ["git", "-C", str(root), "diff", "--name-only", "--diff-filter=ACMR", diff_target, "--"],
+        ["git", "-C", str(root), "diff", "--relative", "--name-only", "--diff-filter=ACMR", diff_target, "--"],
         ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard"],
     ]
     discovered: set[Path] = set()
@@ -486,6 +431,7 @@ def git_changed_python_files(root: Path, base_ref: str | None = None) -> set[Pat
                 check=False,
                 capture_output=True,
                 text=True,
+
                 # Guard against a hung or oddly-configured git blocking lint;
                 # 20s is far beyond any plausible metadata query.
                 timeout=20,
@@ -493,6 +439,8 @@ def git_changed_python_files(root: Path, base_ref: str | None = None) -> set[Pat
         except (OSError, subprocess.SubprocessError):
             continue
         if result.returncode != 0:
+            if base_ref and "diff" in command:
+                return None
             continue
         successful_command = True
         for raw_path in result.stdout.splitlines():
@@ -561,10 +509,9 @@ def resolve_candidates(
                 return form
     for candidate in candidates:
         if candidate and "." not in candidate:
-            suffix = "." + candidate
-            for module in project_modules:
-                if module.endswith(suffix):
-                    return module
+            matches = [module for module in project_modules if module.endswith("." + candidate)]
+            if len(matches) == 1:
+                return matches[0]
     return None
 
 
@@ -868,6 +815,7 @@ def missing_contract_sections(doc: str) -> list[str]:
     all, regardless of documentation convention.
     """
     checks = {
+
         # Roughly one meaningful sentence in any language; shorter
         # docstrings rarely carry a contract worth auditing.
         "purpose": len(doc.strip()) >= 20,
@@ -927,7 +875,8 @@ def is_under_artifact_root(path: Path, root: Path) -> bool:
         parts = {part.lower() for part in path.relative_to(root).parts}
     except ValueError:
         parts = {part.lower() for part in path.parts}
-    return bool(parts & {"artifact", "artifacts"})
+    binding = scope_binding(root, path)
+    return bool(parts & {"artifact", "artifacts"}) or binding.is_under(path, binding.config.artifact_roots)
 
 
 def load_json(path: Path) -> Any:
@@ -1009,7 +958,7 @@ def artifact_candidate_directories(root: Path) -> set[Path]:
         if is_under_artifact_root(path, root) or (path.parent / "manifest.json").is_file():
             candidates.add(path.parent)
 
-    for filename in ("run.json", "runtime.json"):
+    for filename in ("run.json", "runtime.json", "artifact_contract.toml"):
         for path in find_files_named(root, filename):
             if is_under_artifact_root(path, root):
                 candidates.add(path.parent)
@@ -1065,6 +1014,7 @@ def validate_optimization_report(report: dict[str, Any]) -> list[str]:
             problems.append("pipeline_speedup is missing")
         else:
             expected = reference_time / optimized_time
+
             # 1% tolerance absorbs rounding in reported timings without
             # accepting claims that misstate the measured ratio.
             if abs(speedup - expected) / expected > 0.01:
@@ -1106,6 +1056,7 @@ def optimization_report_targets(root: Path) -> dict[str, list[str]]:
         problems = validate_optimization_report(report)
         stage = report["stage"].replace("\\", "/").strip().lower()
         for key in {stage, Path(stage).stem.lower(), stage.removesuffix(".py")}:
+
             # A valid report wins over an invalid one for the same key.
             if key not in targets or not problems:
                 targets[key] = problems
@@ -1136,300 +1087,244 @@ def optimization_report_problems(
     return found
 
 
+def contract_problems(contract: dict[str, Any], artifact_dir: Path) -> list[str]:
+    """Check the declared interface, without inventing scientific semantics."""
+    problems: list[str] = []
+    if not isinstance(contract.get("name"), str) or not contract["name"].strip():
+        problems.append("contract needs a nonempty name")
+    if type(contract.get("version")) is not int or contract["version"] < 1:
+        problems.append("contract needs a positive integer version")
+    placeholder = find_placeholder_text(contract)
+    if placeholder:
+        problems.append(f"contract contains placeholder {placeholder!r}")
+
+    # Require enough information to locate and interpret the declared dataset.
+    for section, keys in {
+        "data": ("path", "format", "representation", "dimensions", "dtype", "unit", "missing_value"),
+        "sample": ("identity", "ordering", "population"),
+        "reading": ("example", "in_memory"),
+    }.items():
+        table = contract.get(section)
+        if not isinstance(table, dict):
+            problems.append(f"contract needs a [{section}] description")
+            continue
+        for key in keys:
+            value = table.get(key)
+            if key == "dimensions":
+                if not isinstance(value, list) or not value or any(not isinstance(axis, str) or not axis.strip() for axis in value):
+                    problems.append("contract data.dimensions must name its axes as a nonempty string array")
+            elif not isinstance(value, str) or not value.strip():
+                problems.append(f"contract needs a nonempty string for {section}.{key}")
+    data = contract.get("data", {})
+    if isinstance(data, dict) and isinstance(data.get("path"), str):
+        payload = artifact_dir / data["path"]
+        if not stays_within(payload, artifact_dir) or not payload.is_file():
+            problems.append("contract data.path must locate an existing file inside the artifact")
+    return problems
+
+
+def payload_schema_problems(contract: dict[str, Any], artifact_dir: Path) -> list[str]:
+    """Check simple declared CSV/JSON schemas at an external data boundary."""
+    data = contract["data"]
+    path = artifact_dir / data["path"]
+    columns = data.get("columns", {})
+    if not isinstance(columns, dict):
+        return ["data.columns must be a table"]
+    try:
+        if data["format"] == "csv":
+            with path.open(newline="", encoding="utf-8") as stream:
+                reader = csv.DictReader(stream)
+                required = set(columns)
+                id_column = contract["sample"].get("id_column")
+                if id_column:
+                    required.add(id_column)
+                if not required.issubset(reader.fieldnames or []):
+                    return ["CSV lacks declared fields or sample ID column"]
+                seen: set[str] = set()
+                group_key = contract["sample"].get("group_column")
+                groups = {value: 0 for value in contract["sample"].get("group_values", [])}
+                for row in reader:
+                    if group_key:
+                        if row.get(group_key) not in groups:
+                            return ["CSV contains an undeclared group"]
+                        groups[row[group_key]] += 1
+                    if id_column and contract["sample"].get("unique_ids", False):
+                        identity = row[id_column]
+                        if not identity or identity in seen:
+                            return ["CSV sample IDs must be nonempty and unique"]
+                        seen.add(identity)
+                    for name, kind in columns.items():
+                        value = row[name]
+                        if value in (None, ""):
+                            if data["missing_value"] == "not_allowed":
+                                return [f"CSV field {name} contains a missing value"]
+                            continue
+                        if kind in ("float", "float32", "float64"):
+                            if not math.isfinite(float(value)):
+                                return [f"CSV field {name} must be finite"]
+                        elif kind in ("int", "int32", "int64"):
+                            int(value)
+                if groups and min(groups.values()) < contract["sample"].get("min_group_count", 0):
+                    return ["CSV has too few observations in a declared group"]
+        elif data["format"] == "json" and columns:
+            payload = load_json(path)
+            if not isinstance(payload, dict) or not set(columns).issubset(payload):
+                return ["JSON lacks declared fields"]
+            for name, kind in columns.items():
+                value = payload[name]
+                if kind == "string" and not isinstance(value, str):
+                    return [f"JSON field {name} must be a string"]
+                if kind in ("float", "float64", "int", "int64"):
+                    if type(value) not in (int, float) or not math.isfinite(value):
+                        return [f"JSON field {name} must be a finite number"]
+                    if kind.startswith("int") and type(value) is not int:
+                        return [f"JSON field {name} must be an integer"]
+    except (OSError, ValueError, TypeError, csv.Error) as error:
+        return [f"payload does not match its declared schema: {error}"]
+    return []
+
+
 def verify_artifact_dir(
     artifact_dir: Path,
     collector: IssueCollector,
     full: bool,
-) -> None:
-    """Verify one artifact directory.
+) -> dict[str, Any] | None:
+    """Verify integrity irrespective of approval; return the loaded manifest.
 
-    Metadata mode (full=False) checks schema, paths, existence, derived
-    hashes, and approval binding without reading payload content, so lint
-    stays cheap on large data. Full mode additionally re-hashes every tracked
-    payload of an approved artifact to detect post-approval tampering.
+    Review eligibility is checked only when consuming a selected review point.
+    Metadata mode reads the small contract; full mode also hashes payloads and
+    checks supported CSV/JSON schemas. Domain-specific invariants belong to I/O.
     """
     manifest_path = artifact_dir / "manifest.json"
-    approval_path = artifact_dir / "approval.json"
-
-    if not manifest_path.is_file():
-        collector.add(
-            "error",
-            "SC004",
-            artifact_dir,
-            0,
-            "Artifact candidate has no manifest.json.",
-        )
-        return
-
     try:
         manifest = load_json(manifest_path)
-    except (OSError, json.JSONDecodeError) as error:
-        collector.add(
-            "error",
-            "SC004",
-            manifest_path,
-            0,
-            f"Artifact manifest is unreadable: {error}.",
-        )
-        return
+        if not isinstance(manifest, dict):
+            raise ValueError("manifest must be an object")
+        files = manifest["files"]
+        identity = manifest["identity_files"]
+        descriptor = manifest["contract"]
+        if not isinstance(files, dict) or not files:
+            raise ValueError("manifest needs a nonempty files object")
+        if not isinstance(identity, list) or not identity or any(type(x) is not str or x not in files for x in identity):
+            raise ValueError("identity_files must reference tracked files")
+        if not isinstance(descriptor, dict) or descriptor.get("path") not in identity:
+            raise ValueError("the contract must be an identity file")
+        if "review_required" in manifest and type(manifest["review_required"]) is not bool:
+            raise ValueError("review_required must be a boolean")
+        for name, digest in files.items():
+            if not isinstance(name, str) or not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+                raise ValueError("files must map relative paths to sha256 hashes")
+            if name in {"manifest.json", "approval.json"} or not stays_within(artifact_dir / name, artifact_dir):
+                raise ValueError(f"invalid tracked path {name!r}")
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        collector.add("error", "SC004", manifest_path, 0, f"Invalid artifact manifest: {error}.")
+        return None
 
-    if not isinstance(manifest, dict) or not isinstance(manifest.get("files"), dict):
-        collector.add(
-            "error",
-            "SC004",
-            manifest_path,
-            0,
-            "Artifact manifest must contain a files object.",
-        )
-        return
-    identity_files = manifest.get("identity_files")
-    if (
-        not isinstance(identity_files, list)
-        or not identity_files
-        or any(not isinstance(name, str) for name in identity_files)
-        or any(name not in manifest["files"] for name in identity_files)
-    ):
-        collector.add(
-            "error",
-            "SC004",
-            manifest_path,
-            0,
-            "Artifact manifest must list non-empty identity_files present in files.",
-        )
-        return
-
-    approval: dict[str, Any] | None = None
-    if approval_path.is_file():
-        try:
-            loaded_approval = load_json(approval_path)
-            if isinstance(loaded_approval, dict):
-                approval = loaded_approval
-            else:
-                raise ValueError("approval root is not an object")
-        except (OSError, json.JSONDecodeError, ValueError) as error:
-            collector.add(
-                "error",
-                "SC003",
-                approval_path,
-                0,
-                f"Approval record is unreadable: {error}.",
-            )
-
-    approved = approval is not None and approval.get("status") == "approved"
+    # These canonical hashes can be checked without re-reading large payloads.
     artifact_hash = derived_artifact_hash(manifest)
     manifest_hash = derived_manifest_hash(manifest)
-    tracked_content_changed = False
-    tracked_names = {str(name).replace("\\", "/") for name in manifest["files"]}
+    if manifest.get("artifact_hash") != artifact_hash or manifest.get("manifest_hash") != manifest_hash:
+        collector.add("error", "SC003", manifest_path, 0, "Recorded hashes disagree with the canonical manifest.")
+    if descriptor.get("sha256") != files[descriptor["path"]]:
+        collector.add("error", "SC003", manifest_path, 0, "Contract descriptor hash disagrees with files.")
 
-    for relative_name, expected_hash in sorted(manifest["files"].items()):
-        tracked_path = artifact_dir / str(relative_name)
-        if not stays_within(tracked_path, artifact_dir):
-            if approved:
-                collector.add(
-                    "error",
-                    "SC007",
-                    manifest_path,
-                    0,
-                    f"Tracked path escapes artifact directory: {relative_name!r}.",
-                )
-                tracked_content_changed = True
-            continue
-        if not tracked_path.is_file():
-            if approved:
-                collector.add(
-                    "error",
-                    "SC007",
-                    tracked_path,
-                    0,
-                    "Tracked artifact file is missing after approval.",
-                )
-                tracked_content_changed = True
-            continue
-        if full and approved:
-            actual_hash = sha256_file(tracked_path)
-            if actual_hash != expected_hash:
-                collector.add(
-                    "error",
-                    "SC007",
-                    tracked_path,
-                    0,
-                    f"Tracked content changed after approval; expected "
-                    f"{expected_hash}, got {actual_hash}.",
-                )
-                tracked_content_changed = True
+    # A published directory must match its inventory, whether reviewed or not.
+    for name, expected in files.items():
+        path = artifact_dir / name
+        if not path.is_file():
+            collector.add("error", "SC007", path, 0, "Tracked file is missing.")
+        elif full and sha256_file(path) != expected:
+            collector.add("error", "SC007", path, 0, "Tracked content differs from the finalized hash.")
+    for path in artifact_dir.rglob("*"):
+        if path.is_file() and path.relative_to(artifact_dir).as_posix() not in set(files) | {"manifest.json", "approval.json"}:
+            collector.add("error", "SC007", path, 0, "Untracked file was added to a finalized artifact.")
 
-    if approved:
-        allowed_untracked = {"approval.json", "manifest.json"}
-        for actual_path in sorted(artifact_dir.rglob("*")):
-            if not actual_path.is_file():
-                continue
-            relative_name = actual_path.relative_to(artifact_dir).as_posix()
-            if relative_name not in tracked_names | allowed_untracked:
-                collector.add(
-                    "error",
-                    "SC007",
-                    actual_path,
-                    0,
-                    "Untracked file was added to an approved artifact.",
-                )
-                tracked_content_changed = True
+    # Contract semantics are small metadata, so validate them in both modes.
+    contract_path = artifact_dir / descriptor["path"]
+    try:
+        contract = tomllib.loads(read_utf8(contract_path))
+        problems = contract_problems(contract, artifact_dir)
+        if contract.get("name") != descriptor.get("name") or contract.get("version") != descriptor.get("version"):
+            problems.append("contract name/version disagrees with its manifest descriptor")
+        if not full and sha256_file(contract_path) != descriptor["sha256"]:
+            problems.append("contract bytes differ from their recorded hash")
+        if full and not problems:
+            problems.extend(payload_schema_problems(contract, artifact_dir))
+        for problem in problems:
+            collector.add("error", "SC004", contract_path, 0, problem)
+    except (OSError, ValueError, TypeError) as error:
+        collector.add("error", "SC004", contract_path, 0, f"Unreadable contract: {error}.")
 
-    if not approved:
-        return
+    # Existing decisions remain bound to exactly what was reviewed.
+    approval_path = artifact_dir / "approval.json"
+    if approval_path.is_file():
+        try:
+            approval = load_json(approval_path)
+            if not isinstance(approval, dict):
+                raise ValueError("approval must be an object")
+            if approval.get("status") == "approved" and (
+                approval.get("artifact_hash") != artifact_hash
+                or approval.get("manifest_hash") != manifest_hash
+            ):
+                raise ValueError("approval does not bind the current artifact and manifest")
+        except (OSError, ValueError) as error:
+            collector.add("error", "SC003", approval_path, 0, str(error))
+    return manifest
 
-    recorded_artifact_hash = manifest.get("artifact_hash")
-    recorded_manifest_hash = manifest.get("manifest_hash")
-    approval_artifact_hash = approval.get("artifact_hash") if approval else None
-    approval_manifest_hash = approval.get("manifest_hash") if approval else None
-    if (
-        tracked_content_changed
-        or recorded_artifact_hash != artifact_hash
-        or recorded_manifest_hash != manifest_hash
-        or approval_artifact_hash != artifact_hash
-        or approval_manifest_hash != manifest_hash
-    ):
-        collector.add(
-            "error",
-            "SC003",
-            approval_path if approval_path.is_file() else manifest_path,
-            0,
-            "Approved artifact/manifest hashes do not match canonical content and provenance.",
+
+def review_satisfied(artifact_dir: Path, manifest: dict[str, Any]) -> bool:
+    """Ordinary artifacts need no decision; selected review points do."""
+    if not manifest.get("review_required", False):
+        return True
+    try:
+        approval = load_json(artifact_dir / "approval.json")
+        return isinstance(approval, dict) and approval.get("status") == "approved" and all(
+            approval.get(key) == manifest[key] for key in ("artifact_hash", "manifest_hash")
         )
+    except (OSError, ValueError):
+        return False
 
 
 def check_artifacts(root: Path, collector: IssueCollector, full: bool) -> None:
-    candidates = artifact_candidate_directories(root)
 
-    for artifact_dir in sorted(candidates):
-        verify_artifact_dir(artifact_dir, collector, full)
+    # Share verification results for the duration of this read-only audit.
+    verified: dict[Path, tuple[dict[str, Any] | None, bool]] = {}
 
+    def verify_once(directory: Path) -> tuple[dict[str, Any] | None, bool]:
+        directory = directory.resolve()
+        if directory not in verified:
+            before = len(collector.issues)
+            manifest = verify_artifact_dir(directory, collector, full)
+            verified[directory] = manifest, len(collector.issues) == before
+        return verified[directory]
+
+    for directory in sorted(artifact_candidate_directories(root)):
+        verify_once(directory)
     for run_path in find_files_named(root, "run.json"):
         try:
-            run_record = load_json(run_path)
-        except (OSError, json.JSONDecodeError):
+            record = load_json(run_path)
+            inputs = record.get("input_artifacts", [])
+            if not isinstance(inputs, list):
+                raise ValueError("input_artifacts must be a list")
+        except (OSError, ValueError, AttributeError) as error:
+            collector.add("error", "SC004", run_path, 0, f"Invalid run record: {error}")
             continue
-        if not isinstance(run_record, dict):
-            continue
-
-        raw_inputs = run_record.get("input_artifacts", [])
-        if not isinstance(raw_inputs, list):
-            continue
-
-        for item in raw_inputs:
-            if isinstance(item, str):
-                raw_path = item
-                recorded_hash = None
-            elif isinstance(item, dict):
-                raw_path = item.get("path")
-                recorded_hash = item.get("artifact_hash")
-                recorded_manifest_hash = item.get("manifest_hash")
-            else:
+        owner = scope_binding(root, run_path).path_root
+        for item in inputs:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                collector.add("error", "SC005", run_path, 0, "Input binding needs a path and exact hashes.")
                 continue
-            if isinstance(item, str):
-                recorded_manifest_hash = None
-            if not isinstance(raw_path, str) or not raw_path:
+            directory = Path(item["path"])
+            if not directory.is_absolute():
+                directory = owner / directory
+            manifest, valid = verify_once(directory)
+            if not valid or manifest is None:
+                collector.add("error", "SC005", run_path, 0, f"Input {item['path']!r} has invalid integrity/contract.")
                 continue
-
-            input_dir = Path(raw_path)
-            if not input_dir.is_absolute():
-                # Paths in run.json are relative to the owning project's
-                # root (the directory whose scientific-code.toml scopes the
-                # pipeline), which may differ from the lint root in a
-                # nested/monorepo layout.
-                input_dir = run_path.parent
-                while input_dir != input_dir.parent and not (
-                    input_dir / "scientific-code.toml"
-                ).is_file():
-                    input_dir = input_dir.parent
-                if not (input_dir / "scientific-code.toml").is_file():
-                    input_dir = root
-                input_dir = input_dir / raw_path
-
-            approval_path = input_dir / "approval.json"
-            manifest_path = input_dir / "manifest.json"
-            try:
-                approval = load_json(approval_path)
-                manifest = load_json(manifest_path)
-            except (OSError, json.JSONDecodeError):
-                collector.add(
-                    "error",
-                    "SC005",
-                    run_path,
-                    0,
-                    f"Input artifact {raw_path!r} lacks readable manifest/approval records.",
-                )
-                continue
-
-            if (
-                not isinstance(approval, dict)
-                or approval.get("status") != "approved"
-                or not isinstance(manifest, dict)
-                or not isinstance(manifest.get("files"), dict)
-                or not isinstance(manifest.get("identity_files"), list)
-            ):
-                collector.add(
-                    "error",
-                    "SC005",
-                    run_path,
-                    0,
-                    f"Input artifact {raw_path!r} is not approved with a valid manifest.",
-                )
-                continue
-
-            try:
-                expected_hash = derived_artifact_hash(manifest)
-                expected_manifest_hash = derived_manifest_hash(manifest)
-            except (KeyError, TypeError):
-                collector.add(
-                    "error",
-                    "SC005",
-                    run_path,
-                    0,
-                    f"Input artifact {raw_path!r} has an invalid identity-file manifest.",
-                )
-                continue
-            if (
-                approval.get("artifact_hash") != expected_hash
-                or manifest.get("artifact_hash") != expected_hash
-                or approval.get("manifest_hash") != expected_manifest_hash
-                or manifest.get("manifest_hash") != expected_manifest_hash
-                or (recorded_hash is not None and recorded_hash != expected_hash)
-                or (
-                    recorded_manifest_hash is not None
-                    and recorded_manifest_hash != expected_manifest_hash
-                )
-            ):
-                collector.add(
-                    "error",
-                    "SC005",
-                    run_path,
-                    0,
-                    f"Input artifact {raw_path!r} does not match the approved hash recorded by the run.",
-                )
-                continue
-
-            if full:
-                # Metadata comparison alone cannot detect payload tampering in
-                # an external artifact; re-hash its tracked content.
-                for relative_name, expected_file_hash in sorted(
-                    manifest["files"].items()
-                ):
-                    tracked_path = input_dir / str(relative_name)
-                    payload_ok = (
-                        stays_within(tracked_path, input_dir)
-                        and tracked_path.is_file()
-                        and sha256_file(tracked_path) == expected_file_hash
-                    )
-                    if not payload_ok:
-                        collector.add(
-                            "error",
-                            "SC005",
-                            run_path,
-                            0,
-                            f"Input artifact {raw_path!r} payload "
-                            f"{relative_name!r} does not match its approved manifest.",
-                        )
-                        break
+            if any(item.get(key) != manifest[key] for key in ("artifact_hash", "manifest_hash")):
+                collector.add("error", "SC005", run_path, 0, f"Input {item['path']!r} differs from its recorded binding.")
+            if not review_satisfied(directory, manifest):
+                collector.add("error", "SC005", run_path, 0, f"Input {item['path']!r} awaits a user-selected review.")
 
 
 def analyze_python(
@@ -1472,7 +1367,7 @@ def analyze_python(
                         path,
                         line,
                         f"View imports stage implementation {display!r}; "
-                        "consume an approved artifact instead.",
+                        "consume the declared result instead.",
                     )
                 continue
             route = find_stage_route(
@@ -1496,7 +1391,7 @@ def analyze_python(
                         path,
                         line,
                         f"View reaches stage implementation transitively via "
-                        f"{display!r} ({pretty}); consume an approved artifact instead.",
+                        f"{display!r} ({pretty}); consume the declared result instead.",
                     )
 
     if stage:
@@ -1509,13 +1404,14 @@ def analyze_python(
         if scientific_args:
             names = ", ".join(sorted({name for _, name in scientific_args}))
             collector.add(
-                "error",
+                "warning",
                 "SC002",
                 path,
                 scientific_args[0][0],
                 f"Stage exposes scientific parameter(s) via CLI ({names}); "
-                "put scientific configuration in TOML.",
+                "prefer explicit configuration, or record effective values for the user-selected CLI.",
             )
+
         # Documented ceiling: config path plus one operational flag. A
         # busier CLI almost always means scientific parameters leaked out
         # of the TOML config.
@@ -1587,8 +1483,8 @@ def analyze_python(
                 )
 
         module_doc = ast.get_docstring(tree, clean=False) or ""
-        module_contract_complete = not missing_contract_sections(module_doc)
 
+        # Module summaries do not describe individual scientific transformations.
         for node in tree.body if isinstance(tree, ast.Module) else []:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -1602,7 +1498,7 @@ def analyze_python(
                     line,
                     f"Function {node.name!r} may mutate input parameter {parameter!r}, obscuring lineage.",
                 )
-            if likely_scientific_function(node) and not module_contract_complete:
+            if likely_scientific_function(node):
                 doc = ast.get_docstring(node, clean=False) or ""
                 missing = missing_contract_sections(doc)
                 if missing:
@@ -1704,14 +1600,14 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--full-artifact-checks",
         action="store_true",
-        help="Re-hash approved artifact payloads and recorded input payloads. "
+        help="Re-hash finalized artifact payloads and recorded input payloads. "
         "Off by default so lint stays cheap on large data; enable for release "
         "verification or scheduled integrity audits.",
     )
     return parser.parse_args(argv)
 
 
-def run(argv: Sequence[str] | None = None) -> int:
+def lint_project(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
     root = Path(args.root).resolve()
     if not root.is_dir():
@@ -1760,10 +1656,11 @@ def run(argv: Sequence[str] | None = None) -> int:
                 f"Python source could not be parsed: {error.msg}.",
             )
 
+    scopes = {path: scope_binding(root, path) for path in text_by_path}
     stage_paths = {
         path.resolve()
         for path, text in text_by_path.items()
-        if is_stage_file(path, scope, text)
+        if is_stage_file(path, scopes[path], text)
     }
 
     project_modules = project_module_names(all_python_files, root)
@@ -1778,7 +1675,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             if resolved is not None and resolved != module:
                 edges.add(resolved)
 
-    selected_files = set(text_by_path)
+    selected_files = set(trees)
     if args.changed_only or args.base_ref:
         changed = git_changed_python_files(root, args.base_ref)
         if changed is not None:
@@ -1802,7 +1699,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             project_modules,
             import_graph,
             stage_paths,
-            scope,
+            scopes[path],
             optimization_targets,
             collector,
         )
@@ -1860,6 +1757,24 @@ def run(argv: Sequence[str] | None = None) -> int:
         )
 
     return 1 if errors or (args.strict_warnings and warnings) else 0
+
+
+def run(argv: Sequence[str] | None = None) -> int:
+    """Report unreadable project inputs as an incomplete audit, including JSON mode."""
+    try:
+        return lint_project(argv)
+    except (OSError, ValueError) as error:
+        args = parse_args(argv if argv is not None else sys.argv[1:])
+        message = f"Audit could not complete: {error}"
+        if args.format == "json":
+            print(json.dumps({
+                "root": str(Path(args.root).resolve()),
+                "issues": [{"code": "SC000", "severity": "error", "path": ".", "line": 0, "message": message}],
+                "summary": {"errors": 1, "warnings": 0, "incomplete": True},
+            }, ensure_ascii=False))
+        else:
+            print(f"ERROR SC000 {message}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

@@ -1,145 +1,110 @@
 # scientific-code: stage
-"""Produce ProcessedTrialsV1.
+"""按振幅下限筛选试次，发布 ProcessedTrials@1 和排除记录。
 
-Input artifact: RawTrialsV1 (hash-bound). Transformation: reject trials whose
-amplitude falls below the config floor as presumed artifacts; every rejected
-trial is listed with its reason in the exclusion ledger. Output artifact:
-ProcessedTrialsV1 (CSV of retained trials plus exclusions.csv ledger).
-Mutation: none; no side effects.
+输入文件与配置
+--------------
+调用方从采集阶段或已验证的外部 RawTrials@1 提供试次行和来源绑定；
+对应原始文件为该产物内的 data/raw_trials.csv。本文件不重复读取它。
+读取 configs/preprocess.toml 的 amplitude_floor_uv，配置路径由调用方传入。
+契约模板为 contracts/processed_trials.toml，模板路径相对项目根目录。
+
+加工逻辑
+--------
+严格低于下限的试次进入排除表；等于下限时保留。
+筛选保持保留试次的 ID、类型、单位及相对顺序；随后检查每组至少剩两个试次。
+
+输出文件
+--------
+在指定新目录中写 data/processed_trials.csv 和 exclusions.csv，后者逐试次
+记录原始数值、排除原因和阶段；同时保存配置、契约和来源记录。
+返回保留行及对应产物绑定；不修改传入数据。
 """
 
-from __future__ import annotations
-
-import csv
-import json
-from datetime import datetime, timezone
+# 共享代码仅负责序列化和产物发布。
 from pathlib import Path
-
-from common import REPO_ROOT, load_toml_config, sha256_file
-
-RUN_DIR = REPO_ROOT / "artifacts" / "processed_trials" / "run_001"
-INPUT_DIR = REPO_ROOT / "artifacts" / "raw_trials" / "run_001"
-CONFIG_PATH = REPO_ROOT / "configs" / "preprocess.toml"
-CODE_PATH = REPO_ROOT / "stages" / "preprocess.py"
+import math
+from artifact_io import PROJECT_ROOT, csv_bytes, publish_payload, read_config
 
 
-def load_input_binding() -> dict[str, str]:
-    """Read the approved input artifact's recorded hashes.
+def run(rows: list[dict], input_binding: dict, config_path: Path,
+        output_dir: Path, *, review_required: bool = False) -> tuple[list[dict], dict]:
+    """筛选试次并保存逐样本排除原因。
 
-    Parameters: none. Returns the dict {path, artifact_hash, manifest_hash}
-    of the input artifact directory. Method: read the input approval.json,
-    require status "approved" (a pending_review artifact must stop the
-    pipeline, not flow through it), then take artifact_hash and
-    manifest_hash from the approval record and report the input path as a
-    repo-relative POSIX string. No mutation or side effects.
+    参数
+    ----
+    rows : list[dict]
+        每行一个试次的 list[dict]，长度为 N。
+        trial_id 为唯一字符串，condition 为 control 或 treatment，
+        amplitude_uv 为有限浮点数，单位为微伏；顺序沿用上游。
+        本函数沿用 RawTrials@1 在上游生成或外部入口建立的保证。
+
+    input_binding : dict
+        包含 path、contract、artifact_hash、manifest_hash 的字典；各值为字符串。
+        path 相对项目根目录，contract 为 RawTrials@1。
+        artifact_hash 绑定数据身份，manifest_hash 绑定完整清单记录。
+        指向本次 rows 的确切来源，不根据一个状态标签猜测数据身份。
+
+    config_path : Path
+        科学配置文件路径；相对路径按调用时的工作目录读取。
+        示例默认采用 configs/preprocess.toml，amplitude_floor_uv 为有限微伏下限。
+        小于下限时排除、等于时保留。
+
+    output_dir : Path
+        本阶段的新输出目录，由编排器在本次 run 目录下指定；不覆盖已有产物。
+
+    review_required : bool
+        默认 False；仅在用户选定本阶段暂停时启用待评审记录。
+
+    处理逻辑
+    --------
+    1. 读取并校验本阶段新引入的有限阈值。
+    2. 将原始行分为保留与排除两部分，记录排除原因。
+    3. 筛选后确认每组仍至少两个试次，再保存两张表及来源。
+
+    产物
+    ----
+    retained : list[dict]
+        与 rows 字段、单位和相对顺序一致的保留子集，每组至少两个试次。
+        返回长度 M 不大于输入长度 N；被移除的行保存在 exclusions.csv。
+
+    binding : dict
+        包含 path、contract、artifact_hash、manifest_hash 的字典；各值为字符串。
+        path 相对项目根目录，contract 为 ProcessedTrials@1。
+        artifact_hash 绑定数据身份，manifest_hash 绑定完整清单记录。
+        此处指向新发布的本阶段结果。
+
+    副作用
+    ------
+    在 output_dir 写入本文件头列出的数据、契约、配置和来源文件；不修改 rows。
     """
-    approval = json.loads((INPUT_DIR / "approval.json").read_text(encoding="utf-8"))
-    if approval.get("status") != "approved":
-        raise ValueError(
-            "input artifact is not approved; run `scientific_artifact.py approve` first"
-        )
-    return {
-        "path": "artifacts/raw_trials/run_001",
-        "artifact_hash": approval["artifact_hash"],
-        "manifest_hash": approval["manifest_hash"],
-    }
 
+    # 阈值是本阶段新输入，在此检查一次其为有限数。
+    config = read_config(config_path)
+    floor = config["amplitude_floor_uv"]
+    if not isinstance(floor, (int, float)) or not math.isfinite(floor):
+        raise ValueError("amplitude_floor_uv must be finite")
 
-def select_valid_trials(
-    rows: list[dict[str, str]], floor_uv: float
-) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    """Split raw rows into retained trials and ledger exclusions.
-
-    Parameters: raw trial rows and the amplitude floor in microvolts.
-    Returns (retained_rows, exclusion_rows); each exclusion row carries
-    trial_id, condition, amplitude_uv, and reason. Method: one pass,
-    amplitude < floor -> excluded with reason "below amplitude floor
-    {floor} uV". No mutation or side effects.
-    """
-    retained: list[dict[str, str]] = []
-    excluded: list[dict[str, str]] = []
+    # 将输入行划分为保留与排除两部分；筛选保留 ID、类型和相对顺序。
+    retained, excluded = [], []
     for row in rows:
-        if float(row["amplitude_uv"]) < floor_uv:
-            excluded.append(
-                {
-                    "trial_id": row["trial_id"],
-                    "condition": row["condition"],
-                    "amplitude_uv": row["amplitude_uv"],
-                    "reason": f"below amplitude floor {floor_uv} uV",
-                }
-            )
+        if row["amplitude_uv"] < floor:
+            excluded.append({**row, "reason": f"amplitude below {floor} uV", "stage": "preprocess"})
         else:
             retained.append(row)
-    return retained, excluded
 
+    # 筛选可能使某组样本不足，因此此处检查新受到影响的分析前提。
+    counts = {name: sum(row["condition"] == name for row in retained) for name in ("control", "treatment")}
+    if min(counts.values()) < 2:
+        raise ValueError("The chosen floor leaves fewer than two trials in a condition")
 
-def write_processed_artifact(
-    retained: list[dict[str, str]], excluded: list[dict[str, str]], run_dir: Path
-) -> None:
-    """Materialize the processed payload and the exclusion ledger.
-
-    Parameters: retained rows, exclusion rows, run directory. Returns
-    nothing. Method: write data/processed_trials.csv (one row per retained
-    trial) and exclusions.csv (one row per excluded trial, with reason).
-    No mutation or side effects.
-    """
-    (run_dir / "data").mkdir(parents=True, exist_ok=True)
-    with (run_dir / "data" / "processed_trials.csv").open(
-        "w", newline="", encoding="utf-8"
-    ) as handle:
-        writer = csv.DictWriter(handle, fieldnames=["trial_id", "condition", "amplitude_uv"])
-        writer.writeheader()
-        writer.writerows(retained)
-    with (run_dir / "exclusions.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(
-            handle, fieldnames=["trial_id", "condition", "amplitude_uv", "reason"]
-        )
-        writer.writeheader()
-        writer.writerows(excluded)
-
-
-def write_run_record(binding: dict[str, str], run_dir: Path) -> None:
-    """Write the execution record binding input and output hashes.
-
-    Parameters: input binding dict and run directory. Returns nothing.
-    Method: run.json records command, config and code paths plus sha256,
-    the input artifact path with its approved artifact_hash and
-    manifest_hash, and produced_artifact.path. output_artifact_hash is
-    patched in by `scientific_artifact.py finalize`. No mutation or side
-    effects.
-    """
-    record = {
-        "command": "python stages/preprocess.py",
-        "config": {
-            "path": "configs/preprocess.toml",
-            "sha256": sha256_file(CONFIG_PATH),
+    # 保存划分的两部分，使每个被移除试次及其原因都可以追踪。
+    columns = ["trial_id", "condition", "amplitude_uv"]
+    binding = publish_payload(
+        {
+            "data/processed_trials.csv": csv_bytes(retained, columns),
+            "exclusions.csv": csv_bytes(excluded, columns + ["reason", "stage"]),
         },
-        "code": {"path": "stages/preprocess.py", "sha256": sha256_file(CODE_PATH)},
-        "input_artifacts": [
-            {
-                "path": binding["path"],
-                "artifact_hash": binding["artifact_hash"],
-                "manifest_hash": binding["manifest_hash"],
-            }
-        ],
-        "produced_artifact": {"path": "artifacts/processed_trials/run_001"},
-        "started_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-    (run_dir / "run.json").write_text(
-        json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        PROJECT_ROOT / "contracts/processed_trials.toml", config_path, Path(__file__),
+        output_dir, [{**input_binding, "role": "raw_trials"}], config_values=config, review_required=review_required,
     )
-
-
-def main() -> None:
-    binding = load_input_binding()
-    config = load_toml_config(CONFIG_PATH)
-    with (INPUT_DIR / "data" / "raw_trials.csv").open(newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
-    retained, excluded = select_valid_trials(rows, float(config["amplitude_floor_uv"]))
-    write_processed_artifact(retained, excluded, RUN_DIR)
-    write_run_record(binding, RUN_DIR)
-    print(f"retained {len(retained)} trials, excluded {len(excluded)} -> {RUN_DIR}")
-
-
-if __name__ == "__main__":
-    main()
+    return retained, binding

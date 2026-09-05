@@ -1,19 +1,59 @@
+# 此科学分支的名称，不采用配置继承。
 name = "raw_main_analysis"
+
+# 新运行目录的父位置，相对项目根目录。
 run_root = "runs/raw_main_analysis"
 
+# 阶段声明表达执行关系，科学计算由各阶段脚本负责。
 [[stage]]
+
+# 此阶段实现的科学过程名称。
 name = "preprocess_raw"
+
+# 相对项目根目录的 Python 源文件路径。
 script = "stages/preprocess_raw.py"
+
+# 带说明的科学参数文件。
 config = "configs/preprocess_raw.toml"
-input_contract = "RawDatasetV1"
-output_contract = "ProcessedDatasetV1"
-requires_approval = true
 
-[[stage]]
-name = "main_analysis"
-script = "stages/main_analysis.py"
-config = "configs/main_analysis.toml"
-input_contract = "ProcessedDatasetV1"
-output_contract = "AnalysisResultV1"
-requires_approval = true
+# 声明输出契约；对应结果须附读取说明。
+output_contract = "ProcessedDataset@1"
 
+# 默认连续执行，仅在用户选定的暂停点设为 true。
+requires_approval = false
+
+# 每个输入均声明科学角色及确切契约版本。
+[[stage.inputs]]
+
+# 阶段用于引用此数据集的角色名。
+role = "raw_signal"
+
+# 输入的数据接口，不是对生产者源文件的导入。
+contract = "RawDataset@1"
+
+# 确切输入位置，避免可变的 latest 别名。
+path = "artifacts/raw_dataset/run_001"
+
+# 可选配套输入，用于演示多输入关联。
+[[stage.inputs]]
+
+# 要关联到信号试次的行为注释。
+role = "behavior"
+
+# 配套表自身的数据契约。
+contract = "BehaviorTable@1"
+
+# 确切的配套产物位置。
+path = "artifacts/behavior/run_001"
+
+# 每次数据关联都需解释连接键及对应数量关系。
+join_keys = ["sample_id"]
+
+# 每个原始试次恰好匹配一条注释记录。
+cardinality = "one_to_one"
+
+# 明确处理未匹配项，不静默丢弃试次。
+missing_matches = "error"
+
+# 保留原始试次顺序，供下游对齐。
+output_order = "raw_signal_order"
