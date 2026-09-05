@@ -1,5 +1,18 @@
 # scientific-code: view
-"""把 AnalysisResult@1 的既有估计值绘制为 SVG，并记录图的来源。
+"""
+把 AnalysisResult@1 的既有估计值绘制为 SVG，并记录图的来源。
+
+文件流程
+--------
+AnalysisResult@1 的 result + binding
+                    |
+                    v
+           映射已有数值并绘图
+                    |
+                    v
+     results.svg + results.provenance.json
+
+科学配置来自上游 configs/analyze.toml；本文件不读取 TOML。
 
 输入文件
 --------
@@ -29,22 +42,29 @@ def render_svg(result: dict) -> str:
     参数
     ----
     result : dict
-        AnalysisResult@1 的标量字典：control_mean_uv、treatment_mean_uv、
-        difference_uv、ci_low_uv、ci_high_uv 为微伏浮点数；
-        n_control、n_treatment 为试次数整数，n_bootstrap、seed 为整数，
-        confidence_level 为严格位于 0 与 1 之间的概率浮点数，method 为方法字符串。
-        调用方已建立这些值的含义，本函数不重新进行统计推断。
+        包含以下字段的标量结果字典：
+        - n_control：整数，对照组保留试次数，无量纲。
+        - n_treatment：整数，处理组保留试次数，无量纲。
+        - control_mean_uv：浮点数，对照组均值，单位为微伏。
+        - treatment_mean_uv：浮点数，处理组均值，单位为微伏。
+        - difference_uv：浮点数，处理组减对照组的均值差，单位为微伏。
+        - ci_low_uv：浮点数，均值差区间下端点，单位为微伏。
+        - ci_high_uv：浮点数，均值差区间上端点，单位为微伏。
+        - confidence_level：浮点数，严格位于 0 与 1 之间的区间概率。
+        - n_bootstrap：整数，组内重采样重复次数。
+        - seed：整数，重采样使用的随机种子。
+        - method：字符串，描述统计方法。
 
-    处理逻辑
-    --------
-    1. 选择覆盖两个均值和零点的显示范围，建立微伏到像素的线性比例。
-    2. 绘制两个均值柱，标注已有试次数，并将已有差值区间放入图注。
-
-    产物
+    返回
     ----
     svg : str
         完整独立 SVG 文本，画布为 640×400 像素，可按 UTF-8 保存为 .svg。
         区间描述均值差，不是两个组各自的误差条。
+
+    处理过程
+    --------
+    1. 选择覆盖两个均值和零点的显示范围，建立微伏到像素的线性比例。
+    2. 绘制两个均值柱，标注已有试次数，并将已有差值区间放入图注。
 
     副作用
     ------
@@ -87,30 +107,44 @@ def write_figure(result: dict, binding: dict, output_path: Path) -> None:
     参数
     ----
     result : dict
-        AnalysisResult@1 的标量字典：control_mean_uv、treatment_mean_uv、
-        difference_uv、ci_low_uv、ci_high_uv 为微伏浮点数；
-        n_control、n_treatment 为试次数整数，n_bootstrap、seed 为整数，
-        confidence_level 为严格位于 0 与 1 之间的概率浮点数，method 为方法字符串。
+        包含以下字段的标量结果字典：
+        - n_control：整数，对照组保留试次数，无量纲。
+        - n_treatment：整数，处理组保留试次数，无量纲。
+        - control_mean_uv：浮点数，对照组均值，单位为微伏。
+        - treatment_mean_uv：浮点数，处理组均值，单位为微伏。
+        - difference_uv：浮点数，处理组减对照组的均值差，单位为微伏。
+        - ci_low_uv：浮点数，均值差区间下端点，单位为微伏。
+        - ci_high_uv：浮点数，均值差区间上端点，单位为微伏。
+        - confidence_level：浮点数，严格位于 0 与 1 之间的区间概率。
+        - n_bootstrap：整数，组内重采样重复次数。
+        - seed：整数，重采样使用的随机种子。
+        - method：字符串，描述统计方法。
 
     binding : dict
-        包含 path、contract、artifact_hash、manifest_hash 的字典；各值为字符串。
-        path 相对项目根目录，contract 为 AnalysisResult@1。
-        artifact_hash 绑定数据身份，manifest_hash 绑定完整清单记录。
-        这里描述 result 所属的分析产物。
+        包含四个字符串字段的来源绑定：
+        - path：相对项目根目录的产物目录路径。
+        - contract：AnalysisResult@1。
+        - artifact_hash：绑定契约和科学数据身份的哈希。
+        - manifest_hash：绑定完整清单及来源记录的哈希。
 
     output_path : Path
         SVG 目标路径，通常位于本次新 run 目录；父目录由调用方创建。
 
-    处理逻辑
+    返回
+    ----
+    返回值 : None
+        函数不返回数值，写入以下文件：
+        - output_path：UTF-8 SVG 文件。
+        - 同名 .provenance.json：来源字典，字段如下：
+          - input_artifact：字典，结构与本函数的参数 binding 一致。
+          - view_code_sha256：字符串，绘图源码的 SHA-256 哈希。
+          - output_sha256：字符串，已写入 SVG 的 SHA-256 哈希。
+          - display：字符串，说明图中数值的显示含义。
+
+    处理过程
     --------
     1. 调用 render_svg 呈现已有值并保存 UTF-8 SVG。
     2. 记录输入绑定、绘图源码哈希、SVG 哈希和显示含义，保存来源 JSON。
-
-    产物
-    ----
-    返回值 : None
-        文件产物为 output_path，以及将其后缀改为 .provenance.json 的来源文件。
-        JSON 含 input_artifact 字典，以及 view_code_sha256、output_sha256、display 字符串。
 
     副作用
     ------

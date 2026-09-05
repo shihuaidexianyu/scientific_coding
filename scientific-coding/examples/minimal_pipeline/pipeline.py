@@ -1,4 +1,23 @@
-"""编排从合成试次到最终图的连续流水线，仅在用户指定处暂停。
+"""
+编排从合成试次到最终图的连续流水线，仅在用户指定处暂停。
+
+文件流程
+--------
+configs/pipeline.toml --> 选择上游、路径和暂停点
+                                |
+                                v
+新采集 或 外部 RawTrials -----> 预处理
+                                |
+外部 ProcessedTrials -----------+
+                                |
+                                v
+                               分析
+                                |
+                                v
+                      results.svg + 来源记录
+
+三个阶段分别使用 configs/acquire_data.toml、
+configs/preprocess.toml 和 configs/analyze.toml。
 
 输入与关联 TOML
 ---------------
@@ -50,13 +69,7 @@ def run(config_path: Path) -> Path:
         raw_artifact、processed_artifact 为已保存产物目录的路径字符串；
         空值表示不复用，两者不能同时非空，复用预处理结果会跳过采集与预处理。
 
-    处理逻辑
-    --------
-    1. 解析路径和暂停选择，拒绝互相冲突的外部输入设置。
-    2. 分配新 run；必要时从外部入口读取数据，否则执行相应上游阶段。
-    3. 顺序执行预处理、分析、绘图，只在用户选定且实际执行的阶段暂停。
-
-    产物
+    返回
     ----
     run_root : Path
         本次新结果目录的路径，形如 artifacts/run_<编号>。
@@ -64,6 +77,12 @@ def run(config_path: Path) -> Path:
         results.svg、results.provenance.json 及 pipeline_config.toml。
         复用时省略被跳过的上游生产目录，暂停时仅包含已完成阶段；
         调用方可由此路径打开最终 SVG 或待查看的阶段产物。
+
+    处理过程
+    --------
+    1. 解析路径和暂停选择，拒绝互相冲突的外部输入设置。
+    2. 分配新 run；必要时从外部入口读取数据，否则执行相应上游阶段。
+    3. 顺序执行预处理、分析、绘图，只在用户选定且实际执行的阶段暂停。
 
     副作用
     ------

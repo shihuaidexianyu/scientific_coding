@@ -91,13 +91,36 @@
 
 据此再修订 skill：说明轮覆盖直接关联的科学 TOML，即使参数值未改；hover 在本地写出真实嵌套结构，不用跨函数引用替代；明确条件样本数可不同、`Path.open` 相对调用时 cwd、不得捏造单次遍历；函数 docstring 后第一个 `#` 块仍须前空行。复测使用独立输入包和结果目录，同时澄清“写过并执行 formatter，最后编辑后 clean check 足够，无须无动作 fix”的判据，修正空 `#`/机器指令的语言误报，其他科学与中文标准不变。第一轮原始产物及评分保留。
 
-第二轮同 3 个案例各 3 次正在独立复测，使用 6 个 worker；与上一组尾部任务重叠时总并发不超过 8。其最终结果单独记录，不以第一轮的结果替代。
+第二轮同 3 个案例各 3 次已完成，使用 6 个 worker；与上一组尾部任务重叠时总并发不超过 8。结果如下：
+
+| 专门案例 | 第二轮原始综合自动评分 |
+|---|---:|
+| 中文文件头、函数 hover 文档、数据结构说明 | 3/3 |
+| 分轮简化冗余检查并保留科学值 | 2/3 |
+| 同一会话接受真实人工代码和科学边界修改 | 2/3 |
+| 合计 | 7/9 |
+
+9 次均有成功读取技能的证据，未知和 API 无效项均为 0。两份失败分别是：简化 rep1 仍留下两行英文 TOML 说明；多轮 rep3 两次运行分析与测试后都主动删除正式 `results/`，导致首轮实际旧产物无法保存、末轮新产物无法按约定位置复核。后者的轨迹有正确科学读数和实际测试成功记录，但正式交付缺失，不能算完整完成。
+
+多轮 rep3 也暴露了本次实验的适用边界：harness 在注入人工改动前尝试读取旧产物，因缺少 `results/summary.json` 提前返回，故独立测试未执行（记录为 `first_tests_returncode=-1`），随后仍发送了真实续接消息。agent 在第二轮自行重建“旧快照”，不能作为原文件被保留的证据；模型 judge 将这部分保留要求评为满足也过宽。该份整体失败保持不变。两批共 6 份多轮尝试都观察到前后相同的实际 session ID，其中 **5 份**完整建立了“旧产物和独立旧测试通过、人工注入、续接并保留旧文件”的证据链，不能声称 6 份全部建立了这一前提。
+
+第二轮人工独立抽查了三类各一份、共三份自动通过的结果，三份仍有说明或执行范围遗漏：
+
+- 中文 hover rep1：把直接打开参数路径解释为相对项目 ROOT，把计数也写成微伏单位，`run` 的嵌套返回结构仍只引用其他函数。末次 formatter 确实覆盖 Python、TOML 和自身并执行成功，最终源码没有发现块前空行遗漏；这不能消除说明事实错误。
+- 分轮简化 rep3：声称 `retained + excluded` 保持整体原始顺序，实际会把原先第一行 control-001 移到末尾；另有笼统 ROOT 路径、缺失 ID 的异常类型错误、`run` 返回结构跨引用，以及部分参数和返回项未独立分段。末次 formatter 内部确有修正及复核，属于有效 clean 操作，但调用只覆盖 `analysis.py`，未覆盖本轮改动的 TOML。独立小例子还发现其 token 处理会把连续两行同块注释拆散；这是脚本对典型布局的缺陷，不等于本例所有最终注释都已经损坏。
+- 多轮 rep1：真实续接、边界行为和人工文件保留通过，但说明把 `len(raw_path)` 当成数据行数，把两次列表推导写成单次遍历，另有路径基准、嵌套结构跨引用、双返回项未分段问题。第二轮未找到重新读取当前 `analysis.py` 的证据，不能把“先重读当前源码”记为已执行。末次 formatter 覆盖 Python，未覆盖改动的 TOML；最终 Python 空行检查通过，问题在执行覆盖范围。
+
+抽查的第二轮简化 rep3 轨迹明确包含新规范关于关联 TOML、本地结构、docstring 后空行和最后 clean check 的条款，排除了该份误加载旧规范的解释。**4/9 到 7/9 是小样本下自动评定的变化；两个版本间还包含上述判据澄清和误报修复，不能据此声称 skill 已稳定保证准确注释。** 严格的可读性验收仍未被这三份自动通过样本证明。原始评分、人工发现和实验限制分别保留，本轮到此收敛，没有再追加第三批提示或测试。
 
 ## 可复查证据
 
 原始结果位于 `evals/results/remote_20260905/downloaded/results/`，共 48 份任务 verdict，按 current、previous、generated_current、generated_previous、spacing_current、spacing_v2_current 分组。最后两组已完整拉回，原有四组文件保留不变。可以直接查看[第一轮格式脚本汇总](../results/remote_20260905/downloaded/results/spacing_current/summary.md)和[强化后的汇总](../results/remote_20260905/downloaded/results/spacing_v2_current/summary.md)；各组保留完整轨迹、diff、最终源码、产物、检查结果和 judge 原始回答。
 
-对应 `spacing.log`、`spacing_v2.log`、`spacing_completed.json`、`spacing_v2_completed.json` 已保存在 `downloaded/`。两组结束标记的返回码分别为 1 和 0，与存在 1 个失败、全部自动通过相符。本次收尾仅取回和审阅证据，没有启动新的远程任务。本地临时格式脚本为 `evals/results/task_comment_format.py`。这些运行文件被 Git 忽略，不混入 skill 的运行依赖。服务器测试工作目录为 `/home/hw/scientific_coding_skilltest_20260905_1788607648`。
+对应 `spacing.log`、`spacing_v2.log`、`spacing_completed.json`、`spacing_v2_completed.json` 已保存在 `downloaded/`。两组结束标记的返回码分别为 1 和 0，与存在 1 个失败、全部自动通过相符。前 48 次的证据收尾只取回和审阅文件；随后按用户继续测试的要求另启动上述两批专门案例。本地临时格式脚本为 `evals/results/task_comment_format.py`。这些运行文件被 Git 忽略，不混入 skill 的运行依赖。服务器测试工作目录为 `/home/hw/scientific_coding_skilltest_20260905_1788607648`。
+
+新增两批的完整证据已分别回收至 `evals/results/review_followup_20260905/downloaded/` 与 `evals/results/review_followup_v2_20260905/downloaded/`，可直接查看[第一轮汇总](../results/review_followup_20260905/downloaded/results/summary.md)及[第二轮汇总](../results/review_followup_v2_20260905/downloaded/results/summary.md)。每批均保留 `batch.log`、`completed.json`、`launch_manifest.json`；案例目录保留完整轨迹、diff、最终源码、科学检查与原始 judge，多轮案例另有 `turn1/`、`turn2_trajectory.txt`、`conversation.json` 和 `injected_human_diff.txt`。空 `#` 误报的修正诊断另存于 `evals/results/review_followup_20260905/diagnostics/toml_comment_correction.json`，未覆盖原 verdict。
+
+两批远程子目录分别是 `review_followup_1788612382` 与 `review_followup_v2_1788613088`。**18 个案例尝试、24 次真实 agent CLI 轮次全部结束**，每次 agent 调用返回码均为 0；两批 runner 的结束码均为 1，表示各有评测失败，并非运行仍未完成。回收后检查两个启动 PID（1030815、1037372）及对应 runner 命令均已不存在，无这两批活动任务。连同前序 48 次，本次保留 66 个案例尝试、72 次 agent CLI 轮次；不同版本不合并计算通过率，judge 调用不计入 agent 轮次。
 
 对照包 SKILL.md 的 SHA-256（从各阶段保存的输入包重新核对）：
 
@@ -107,5 +130,9 @@
 | 前 42 次修改稿 | `71aab12867bd1bbf8bdbf010887050413185e192434b9c90735a04ef885a21d5` |
 | 首次加入自动格式脚本要求 | `66b10d0b9fa668c9329d5611b410358af04a232c237c113b400bae3cb8db5935` |
 | 强化格式脚本执行与复查要求 | `c5d81efe2873df98a04333fa1b6ea71fac9f7af4885f3beddb1759a157d0f6ae` |
+| 中文、分轮与真实续接第一轮 | `957e919a40948e48d49382a2b61b7173fa75e45991330ac32d6285ece1b8652a` |
+| 针对遗漏修订后的第二轮 | `0716f881fdefe2dd799cbe199bf5176eb2ada0620bc6025198987f4902f49744` |
+
+追加两批完整输入包的 SHA-256（本地与远程匹配）分别为 `758bc92438021d0a1fa526723a5ff6f6ac146f11f377ab46996fa7ffcb44e425` 和 `da308047b34964653b3b3bbc02b56cf214e7f7fd018e667d7ed9363870997800`，与输入包及启动清单一起保存在对应本地结果目录中。
 
 不同测试阶段保留各自输入包，未把后来的修复冒充成此前已测结果。

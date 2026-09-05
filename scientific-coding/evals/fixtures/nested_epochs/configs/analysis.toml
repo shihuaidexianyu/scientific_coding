@@ -1,0 +1,4 @@
+# Baseline definition.
+[baseline]
+# Zero-based sample positions used for each trial/channel baseline mean.
+sample_indices = [0]

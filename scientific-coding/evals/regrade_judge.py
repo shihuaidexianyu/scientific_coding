@@ -113,6 +113,8 @@ def grade(
         final_source=final_source,
     )
     verdict["judge"] = judge
+    if case.get("layout_spec"):
+        verdict["dimensions"] = graders.assessment_dimensions(verdict.get("outcomes", {}), judge)
     graders.decide_verdict(verdict, backend=verdict.get("backend", "claude"), requires_judge=case.get("requires_judge", True))
     verdict_path.write_text(
         json.dumps(verdict, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

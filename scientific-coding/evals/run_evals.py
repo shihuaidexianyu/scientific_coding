@@ -104,6 +104,22 @@ def materialize_repo(case: dict[str, Any], workdir: Path, mode: str, backend: st
             f"# Task setup\n\n{case.get('setup', '')}\n", encoding="utf-8"
         )
 
+    if fixture_name == "scientific_review" and case.get("variant") == "packed_docs":
+        path = workdir / "analysis.py"
+        source = path.read_text(encoding="utf-8")
+        packed = {
+            "load_trials": "读取两张 CSV 并按 ID 连接。参数：raw_path : Path，振幅表；labels_path : Path，条件表。返回：rows : list[dict]，每行含 trial_id、condition、amplitude_uv。处理过程：1. 读取；2. 校验；3. 连接。副作用：读取文件。",
+            "filter_trials": "根据阈值分组。参数：rows : list[dict]，已加载行；floor_uv : float，微伏阈值。返回：retained : list[dict]，大于等于阈值；excluded : list[dict]，小于阈值。处理过程：两次列表推导分别筛选。副作用：不修改输入。",
+            "summarize": "按条件汇总。参数：rows : list[dict]，保留行。返回：result : dict，counts 是计数字典，means_uv 是均值字典，difference_uv 是 treatment 减 control。处理过程：分组、检查非空、求均值。副作用：不写文件。",
+            "run": "运行研究。参数：config_path : Path，含 analysis.floor_uv 的 TOML 路径。返回：result : dict，包含 counts、means_uv、difference_uv。处理过程：读取配置，加载数据，筛选，汇总，写出。副作用：创建或覆盖 results 中两份结果。",
+        }
+        for node in reversed([item for item in ast.parse(source).body if isinstance(item, ast.FunctionDef)]):
+            statement = node.body[0]
+            lines = source.splitlines(keepends=True)
+            lines[statement.lineno - 1:statement.end_lineno] = ['    """' + packed[node.name] + '"""\n']
+            source = "".join(lines)
+        path.write_text(source, encoding="utf-8")
+
     if mode != "baseline" and backend != "mock":
         if backend == "claude":
 
@@ -451,30 +467,39 @@ def run_single(
             first_outcomes = graders.review_study_outcome(workdir, strict=False, require_docs=False)
             old_test_code = first_outcomes["evidence"].get("independent_tests_returncode", -1)
             (first / "independent_tests.txt").write_text(first_outcomes["evidence"].get("independent_tests_output", "No successful first-round test evidence"), encoding="utf-8")
-            prior = workdir / "results_before_user_change"
-            if (workdir / "results").is_dir():
-                shutil.copytree(workdir / "results", prior)
-            previous_results = {path.relative_to(workdir).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-                                for path in prior.rglob("*") if path.is_file()}
-            manual = apply_review_update(workdir)
-            (run_dir / "injected_human_diff.txt").write_text(manual["analysis_change"]["diff"], encoding="utf-8")
-            followup = case.get("followup_prompt_zh", case["followup_prompt"]) if language == "zh" else case["followup_prompt"]
-            (run_dir / "followup_prompt.txt").write_text(followup, encoding="utf-8")
-            resumed, resumed_code, resumed_elapsed = run_agent(backend, followup, workdir, timeout, session_id=session_id, resume=True)
-            (run_dir / "turn2_trajectory.txt").write_text(resumed, encoding="utf-8")
-            conversation = {"kind": "real resumed CLI conversation" if backend != "mock" else "mock plumbing only",
-                            "session_id": session_id, "first_outcomes": first_outcomes,
-                            "first_tests_returncode": old_test_code, "manual_file": manual,
-                            "previous_results": previous_results,
-                            "followup_prompt": followup, "turn_returncodes": [returncode, resumed_code],
-                            "observed_first_session_ids": observed_session_ids(trajectory),
-                            "observed_second_session_ids": observed_session_ids(resumed),
-                            "sequence": ["first agent turn", "first independent result checks", "first independent regression tests",
-                                         "save previous results", "inject human-owned code", "send resumed user request", "second agent turn"]}
-            (run_dir / "conversation.json").write_text(json.dumps(conversation, ensure_ascii=False, indent=2), encoding="utf-8")
-            trajectory += "\n" + json.dumps({"type": "eval_user_followup", "text": followup}, ensure_ascii=False) + "\n" + resumed
-            returncode = resumed_code
-            elapsed += resumed_elapsed
+            first_ready = first_outcomes["pass"] and old_test_code == 0
+            if case.get("require_successful_first_round") and not first_ready:
+                conversation = {"kind": "first round incomplete; user change not injected",
+                                "session_id": session_id, "first_outcomes": first_outcomes,
+                                "first_tests_returncode": old_test_code,
+                                "observed_first_session_ids": observed_session_ids(trajectory),
+                                "turn_returncodes": [returncode]}
+                (run_dir / "conversation.json").write_text(json.dumps(conversation, ensure_ascii=False, indent=2), encoding="utf-8")
+            else:
+                prior = workdir / "results_before_user_change"
+                if (workdir / "results").is_dir():
+                    shutil.copytree(workdir / "results", prior)
+                previous_results = {path.relative_to(workdir).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+                                    for path in prior.rglob("*") if path.is_file()}
+                manual = apply_review_update(workdir)
+                (run_dir / "injected_human_diff.txt").write_text(manual["analysis_change"]["diff"], encoding="utf-8")
+                followup = case.get("followup_prompt_zh", case["followup_prompt"]) if language == "zh" else case["followup_prompt"]
+                (run_dir / "followup_prompt.txt").write_text(followup, encoding="utf-8")
+                resumed, resumed_code, resumed_elapsed = run_agent(backend, followup, workdir, timeout, session_id=session_id, resume=True)
+                (run_dir / "turn2_trajectory.txt").write_text(resumed, encoding="utf-8")
+                conversation = {"kind": "real resumed CLI conversation" if backend != "mock" else "mock plumbing only",
+                                "session_id": session_id, "first_outcomes": first_outcomes,
+                                "first_tests_returncode": old_test_code, "manual_file": manual,
+                                "previous_results": previous_results,
+                                "followup_prompt": followup, "turn_returncodes": [returncode, resumed_code],
+                                "observed_first_session_ids": observed_session_ids(trajectory),
+                                "observed_second_session_ids": observed_session_ids(resumed),
+                                "sequence": ["first agent turn", "first independent result checks", "first independent regression tests",
+                                             "save previous results", "inject human-owned code", "send resumed user request", "second agent turn"]}
+                (run_dir / "conversation.json").write_text(json.dumps(conversation, ensure_ascii=False, indent=2), encoding="utf-8")
+                trajectory += "\n" + json.dumps({"type": "eval_user_followup", "text": followup}, ensure_ascii=False) + "\n" + resumed
+                returncode = resumed_code
+                elapsed += resumed_elapsed
         (run_dir / "trajectory.txt").write_text(trajectory, encoding="utf-8")
 
         diff_text = capture_diff(workdir) if has_git else "(git unavailable)"
@@ -488,6 +513,9 @@ def run_single(
         violations = graders.check_patterns(workdir, case.get("fail_if_patterns", []))
         outcomes = graders.outcome_checks(workdir, case, before, conversation=conversation)
         final_source = graders.source_evidence(workdir)
+        if case.get("layout_spec"):
+            execution = graders.execution_evidence(trajectory)
+            (run_dir / "execution_evidence.json").write_text(json.dumps(execution, ensure_ascii=False, indent=2), encoding="utf-8")
         (run_dir / "source_evidence.json").write_text(json.dumps(final_source, ensure_ascii=False, indent=2), encoding="utf-8")
         (run_dir / "outcomes.json").write_text(json.dumps(outcomes, ensure_ascii=False, indent=2), encoding="utf-8")
         (run_dir / "initial_artifact_hashes.json").write_text(json.dumps(before, indent=2), encoding="utf-8")
@@ -533,6 +561,9 @@ def run_single(
             final_source=final_source,
         )
 
+    if case.get("layout_spec"):
+        verdict["dimensions"] = graders.assessment_dimensions(outcomes, verdict.get("judge", {}))
+
     graders.decide_verdict(verdict, backend=backend, requires_judge=case.get("requires_judge", True))
     (run_dir / "verdict.json").write_text(
         json.dumps(verdict, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -572,6 +603,31 @@ def summarize(records: list[dict[str, Any]], results_dir: Path) -> None:
             f"| {passes}/{assessed} | {unknown} | {invalid} | {smoke} | {errors} | {triggered} |"
         )
 
+    # 新版式案例分开报告机械版式、科学结果、语义和格式器执行；历史组不追加标准。
+    dimensions = ("layout", "science", "semantic_accuracy", "formatter_execution")
+
+    def dimension_status(record: dict, name: str) -> str:
+        verdict = record["verdict"]
+        if verdict.get("status") in {"invalid", "smoke"}:
+            return "unknown"
+        value = verdict.get("dimensions", {}).get(name, {})
+        if type(value.get("pass")) is bool:
+            return "met" if value["pass"] else "unmet"
+        return value.get("status", "unknown")
+
+    if any(record["verdict"].get("dimensions") for record in records):
+        lines += ["", "Dimension cells show met / assessed (unknown excluded); semantic and execution ratings remain model judgments.", "",
+                  "| case | layout | science | semantic accuracy | formatter execution |",
+                  "|---|---|---|---|---|"]
+        for (case_id, mode, language), group in sorted(groups.items()):
+            if not any(record["verdict"].get("dimensions") for record in group):
+                continue
+            cells = []
+            for name in dimensions:
+                statuses = [dimension_status(record, name) for record in group]
+                cells.append(f"{statuses.count('met')}/{sum(status in {'met', 'unmet'} for status in statuses)} (unknown {statuses.count('unknown')})")
+            lines.append(f"| {case_id} | " + " | ".join(cells) + " |")
+
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "limitations": limitations,
@@ -587,6 +643,8 @@ def summarize(records: list[dict[str, Any]], results_dir: Path) -> None:
                 "linter": r["verdict"]["linter"],
                 "skill_triggered": r["verdict"].get("skill_triggered"),
                 "deterministic_violations": r["verdict"]["deterministic_violations"],
+                **({"dimensions": {name: dimension_status(r, name) for name in dimensions}}
+                   if r["verdict"].get("dimensions") else {}),
             }
             for r in records
         ],

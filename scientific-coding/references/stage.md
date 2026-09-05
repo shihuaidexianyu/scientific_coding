@@ -47,12 +47,24 @@ A preferred top-level shape is:
 def main() -> None:
     """按顺序执行本阶段。
 
-    参数：无；配置路径和输入位置由项目入口确定。
+    参数
+    ----
+    无参数。配置路径和输入位置由项目入口确定。
 
-    处理逻辑：读取输入、筛选、对齐、计算特征并发布结果。
+    返回
+    ----
+    None
+        不返回值；结果写入项目契约声明的位置。
 
-    产物：不返回值；写入项目契约声明的数据和来源文件。
-    实际生成时必须在文件头补明具体输入、输出和 TOML 路径。
+    处理过程
+    --------
+    1. 读取输入、筛选有效试次并对齐。
+    2. 计算特征，发布数据及来源记录。
+
+    副作用
+    ------
+    读写阶段文件；实际生成时须替换为具体输入、输出和 TOML 路径，
+    并在文件头用字符流程图展示对应关系。
     """
 
     # 在入口读取配置和外部数据，一次建立所需保证。
@@ -76,7 +88,7 @@ The exact functions should follow the method, not this example. Avoid opaque ent
 
 ## Scientific Function Contracts
 
-For every defined function, provide a Chinese docstring/documentation comment that the language service can display when the user hovers over a call. In Python it must be the first statement inside the function. Separate purpose, parameters, processing logic, products and side effects with blank lines. Explain each parameter and each returned item in its own spaced paragraph, including actual fields/axes, types, units, path bases, defaults and relevant assumptions. Explain the ordered processing rather than merely naming the algorithm. The file header separately names inputs, outputs, processing flow and associated TOML files. Follow [readability.md](readability.md) and [the header template](../templates/stage_header.md).
+For every defined function, provide real Chinese hover documentation following [the fixed header template](../templates/stage_header.md): purpose, 参数, 返回, 处理过程, 副作用. Give each parameter/return a name-and-type line, indented explanation and separate paragraph; expand actual fields/axes, units, paths and assumptions locally. The Python file header opens with `"""` on its own line and includes a text diagram of real inputs, processing, outputs and associated TOML. Follow [readability.md](readability.md) for layout and hover verification.
 
 Prefer scientific names such as `compute_hfb`, `align_trials`, or `run_permutation_test`. Keep execution helpers visibly separate. Avoid `utils.py`, `helpers.py`, `misc.py`, and `common.py` unless the code is genuinely stable infrastructure rather than study logic.
 

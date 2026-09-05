@@ -1,5 +1,19 @@
 # scientific-code: acquisition-stage
-"""生成两组独立合成试次，发布 RawTrials@1 原始数据。
+"""
+生成两组独立合成试次，发布 RawTrials@1 原始数据。
+
+文件流程
+--------
+configs/acquire_data.toml
+            |
+            v
+  检查参数、生成独立试次
+            |
+            v
+  data/raw_trials.csv + 契约、配置与来源
+            |
+            v
+    rows + binding（传给调用方）
 
 输入与配置
 ----------
@@ -43,24 +57,28 @@ def run(config_path: Path, output_dir: Path, *, review_required: bool = False) -
     review_required : bool
         默认 False；仅在调用方已选定此阶段为人工暂停点时为 True。
 
-    处理逻辑
+    返回
+    ----
+    rows : list[dict]
+        每行代表一个试次，列表长度为 N，字段如下：
+        - trial_id：唯一字符串，标识试次。
+        - condition：字符串，值为 control 或 treatment。
+        - amplitude_uv：有限浮点数，单位为微伏。
+
+        N 为每组试次数的两倍，先 control 后 treatment，组内编号递增。
+
+    binding : dict
+        包含四个字符串字段的来源绑定：
+        - path：相对项目根目录的产物目录路径。
+        - contract：RawTrials@1。
+        - artifact_hash：绑定契约和科学数据身份的哈希。
+        - manifest_hash：绑定完整清单及来源记录的哈希。
+
+    处理过程
     --------
     1. 在生成入口检查本次配置，建立局部随机数发生器。
     2. 先生成对照组再生成处理组，按抽取的标准差倍数进行正态抽样。
     3. 由生成顺序构造 ID，振幅舍入四位，保存 CSV 和来源记录。
-
-    产物
-    ----
-    rows : list[dict]
-        每行一个试次的 list[dict]，长度为 N。
-        trial_id 为唯一字符串，condition 为 control 或 treatment，
-        amplitude_uv 为有限浮点数，单位为微伏；先 control 后 treatment，组内编号递增。
-        N 等于每组试次数的两倍；ID 示例为 control-001。
-
-    binding : dict
-        包含 path、contract、artifact_hash、manifest_hash 的字典；各值为字符串。
-        path 相对项目根目录，contract 为 RawTrials@1。
-        artifact_hash 绑定数据身份，manifest_hash 绑定完整清单记录。
 
     副作用
     ------

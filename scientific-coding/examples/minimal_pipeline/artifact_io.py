@@ -1,4 +1,12 @@
-"""为示例提供明确的配置读取、序列化、产物发布和外部读取边界。
+"""
+为示例提供明确的配置读取、序列化、产物发布和外部读取边界。
+
+文件流程
+--------
+配置 TOML ----------> 读取配置 ----------> 配置字典
+内存行或字典 -------> 序列化 ------------> CSV / JSON 字节
+数据 + 契约 + TOML -> 暂存、封存、发布 --> 新产物 + 绑定
+外部产物 ----------> 核验并加载 --------> 内存数据 + 绑定
 
 输入文件与配置
 --------------
@@ -34,7 +42,7 @@ import tempfile
 import time
 import tomllib
 
-# 数据及配置路径以本文件所在项目为基准，不随终端工作目录改变。
+# 项目根常量供编排器解析配置值中的路径，并用于记录产物相对路径。
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 # 仅在模块加载时定位一次已安装 skill 的共享产物工具。
@@ -62,15 +70,16 @@ def read_config(path: Path) -> dict:
         UTF-8 TOML 文件路径；相对路径按当前工作目录打开。
         具体字段由调用方所用的科学配置或编排配置定义。
 
-    处理逻辑
-    --------
-    读取文本并解析 TOML 语法，不重复实施后续阶段的科学参数检查。
-
-    产物
+    返回
     ----
     config : dict
         TOML 解析后的字典；配置节为嵌套字典，各值保持 TOML 对应的类型。
         例如 {"seed": 20260904, "n_trials_per_condition": 40}。
+
+    处理过程
+    --------
+    1. 读取 UTF-8 配置文本。
+    2. 解析 TOML 语法，返回配置字典，由调用阶段解释科学约束。
 
     副作用
     ------
@@ -93,14 +102,16 @@ def csv_bytes(rows: list[dict], columns: list[str]) -> bytes:
     columns : list[str]
         字段名列表，决定 CSV 列顺序；例如 ["trial_id", "condition", "amplitude_uv"]。
 
-    处理逻辑
-    --------
-    建立内存文本缓冲区，按列名写表头和各行，以换行符分隔记录，再编码为 UTF-8。
-
-    产物
+    返回
     ----
     content : bytes
         含一行表头和 N 行数据的 CSV 文件内容，不额外添加数据框索引列。
+
+    处理过程
+    --------
+    1. 建立内存文本缓冲区，按 columns 写入 CSV 表头。
+    2. 沿 rows 顺序写各行，使用换行符分隔记录。
+    3. 将完整文本编码为 UTF-8 字节。
 
     副作用
     ------
@@ -124,15 +135,15 @@ def json_bytes(value: dict) -> bytes:
         可 JSON 序列化的字段字典，值可含字符串、数值、列表、嵌套字典及 None。
         科学结果字段由结果契约定义，来源字段由发布函数定义；数值不得为非有限数。
 
-    处理逻辑
-    --------
-    按现有字段顺序序列化，保留中文、使用缩进并追加换行，编码为 UTF-8。
-    由标准序列化器拒绝 JSON 不支持的非有限数。
-
-    产物
+    返回
     ----
     content : bytes
         可直接写入 .json 文件的 UTF-8 内容，根节点为对象。
+
+    处理过程
+    --------
+    1. 按现有键顺序序列化字典，保留中文并使用缩进。
+    2. 由标准序列化器拒绝非有限数，追加换行并编码为 UTF-8 字节。
 
     副作用
     ------
@@ -152,18 +163,25 @@ def binding_for(directory: Path, manifest: dict) -> dict:
         已发布产物目录，用于生成相对项目根目录的路径。
 
     manifest : dict
-        封存或外部核验已获得的 manifest；含 contract 字典（name 为字符串，version 为整数），
-        以及 artifact_hash、manifest_hash 两个字符串字段。
+        封存或外部核验获得的清单字典，使用以下字段：
+        - contract：字典，含 name（字符串）和 version（整数）。
+        - artifact_hash：字符串，科学数据身份哈希。
+        - manifest_hash：字符串，完整清单哈希。
 
-    处理逻辑
-    --------
-    将目录转为相对路径，从现有 manifest 提取契约名称、版本和两个哈希。
-
-    产物
+    返回
     ----
     binding : dict
-        包含 path、contract、artifact_hash、manifest_hash 的字典；各值为字符串。
-        path 相对项目根目录，contract 形如 RawTrials@1，两个哈希分别绑定数据身份和完整记录。
+        包含四个字符串字段的来源绑定：
+        - path：相对项目根目录的产物目录路径。
+        - contract：契约名称@版本，例如 RawTrials@1。
+        - artifact_hash：绑定契约和科学数据身份的哈希。
+        - manifest_hash：绑定完整清单及来源记录的哈希。
+
+    处理过程
+    --------
+    1. 将产物目录转为相对项目根目录的路径。
+    2. 从已有 manifest 提取契约名称、版本和两个哈希。
+    3. 返回四个字符串字段组成的绑定，不重新散列文件。
 
     副作用
     ------
@@ -199,13 +217,18 @@ def publish_payload(payloads: dict[str, bytes], contract_path: Path,
 
     script_path : Path
         生产该数据的阶段 Python 源文件路径，用于记录实际源码哈希和阶段名称。
+        必须位于 PROJECT_ROOT 内，以便记录相对项目根目录的源码位置。
 
     output_dir : Path
         尚不存在的新产物目标目录；暂存目录建立在它的父目录中。
 
     inputs : list[dict]
-        本次消费的输入绑定列表；每项含 path、contract、artifact_hash、
-        manifest_hash 字符串，可另含 role 描述输入角色；采集阶段使用空列表。
+        本次输入的绑定列表；采集阶段为空列表。每项包含：
+        - path：字符串，相对项目根目录的输入产物路径。
+        - contract：字符串，输入契约的名称及版本。
+        - artifact_hash：字符串，输入科学数据身份哈希。
+        - manifest_hash：字符串，输入完整清单哈希。
+        - role：可选字符串，描述输入承担的科学角色。
 
     config_values : dict
         调用方已解析并使用的有效配置，键值结构与 config_path 对应。
@@ -214,22 +237,26 @@ def publish_payload(payloads: dict[str, bytes], contract_path: Path,
     review_required : bool
         默认 False；只有用户选定此产物为暂停点时才写待评审记录。
 
-    处理逻辑
+    返回
+    ----
+    binding : dict
+        包含四个字符串字段的来源绑定：
+        - path：相对项目根目录的产物目录路径。
+        - contract：契约名称@版本，例如 RawTrials@1。
+        - artifact_hash：绑定契约和科学数据身份的哈希。
+        - manifest_hash：绑定完整清单及来源记录的哈希。
+
+    处理过程
     --------
     1. 建立私有暂存目录，写数据、契约、配置副本及真实来源信息。
     2. 调用一次封存工具绑定文件哈希，不重复扫描生产者已保证的行级事实。
     3. 将完整暂存目录重命名为目标目录；失败时只清理自己的暂存目录。
 
-    产物
-    ----
-    binding : dict
-        包含 path、contract、artifact_hash、manifest_hash 的字典；各值为字符串。
-        path 相对项目根目录，contract 形如 RawTrials@1，两个哈希分别绑定数据身份和完整记录。
-        output_dir 中保留 payloads 的文件，以及契约、配置、run.json、manifest.json。
-
     副作用
     ------
-    创建上述新目录及文件；不覆盖已有产物，不修改调用方对象。
+    在 output_dir 创建 payloads 中的数据文件，以及 artifact_contract.toml、
+    config.toml、run.json 和 manifest.json；仅选定评审点时额外写评审记录。
+    不覆盖已有产物，不修改调用方对象。
     记录时间属于来源元数据，不作为阶段运行耗时的测量。
     """
 
@@ -297,29 +324,40 @@ def load_external_artifact(directory: Path, expected_contract: str) -> tuple[obj
     expected_contract : str
         消费方要求的确切契约，形如 RawTrials@1、ProcessedTrials@1 或 AnalysisResult@1。
 
-    处理逻辑
+    返回
+    ----
+    data : list[dict] 或 dict
+        RawTrials@1 或 ProcessedTrials@1 返回试次行列表：
+        沿用文件顺序，每行包含以下字段：
+        - trial_id：唯一字符串，标识试次。
+        - condition：字符串，值为 control 或 treatment。
+        - amplitude_uv：有限浮点数，单位为微伏。
+
+        AnalysisResult@1 返回字典，字段如下：
+        - n_control：整数，对照组保留试次数，无量纲。
+        - n_treatment：整数，处理组保留试次数，无量纲。
+        - control_mean_uv：浮点数，对照组均值，单位为微伏。
+        - treatment_mean_uv：浮点数，处理组均值，单位为微伏。
+        - difference_uv：浮点数，处理组减对照组的均值差，单位为微伏。
+        - ci_low_uv：浮点数，均值差区间下端点，单位为微伏。
+        - ci_high_uv：浮点数，均值差区间上端点，单位为微伏。
+        - confidence_level：浮点数，严格位于 0 与 1 之间的区间概率。
+        - n_bootstrap：整数，组内重采样重复次数。
+        - seed：整数，重采样使用的随机种子。
+        - method：字符串，描述统计方法。
+
+    binding : dict
+        包含四个字符串字段的来源绑定：
+        - path：相对项目根目录的产物目录路径。
+        - contract：与 expected_contract 一致。
+        - artifact_hash：绑定契约和科学数据身份的哈希。
+        - manifest_hash：绑定完整清单及来源记录的哈希。
+
+    处理过程
     --------
     1. 核验实际字节、清单和声明的基础 CSV/JSON 结构。
     2. 匹配消费方契约，只在产物已声明评审要求时检查对应决定。
     3. 根据 data.columns 把 CSV 数值列转换一次；JSON 保持其解析类型。
-
-    产物
-    ----
-    data : list[dict] 或 dict
-        RawTrials@1 或 ProcessedTrials@1 返回长度为 N 的试次行列表：
-        每行 trial_id 为唯一字符串，condition 为 control 或 treatment 字符串，
-        amplitude_uv 为有限 float，单位为微伏；沿用文件顺序。
-
-        AnalysisResult@1 返回标量字典：control_mean_uv、treatment_mean_uv、
-        difference_uv、ci_low_uv、ci_high_uv 为微伏浮点数；
-        n_control、n_treatment 为试次数整数，n_bootstrap、seed 为整数，
-        confidence_level 为区间概率浮点数，method 为方法说明字符串。
-        CSV 的字段转换由 data.columns 声明；JSON 保持解析后的类型。
-
-    binding : dict
-        包含 path、contract、artifact_hash、manifest_hash 的字典；各值为字符串。
-        path 相对项目根目录，contract 与 expected_contract 一致。
-        artifact_hash 绑定数据身份，manifest_hash 绑定完整清单记录。
 
     副作用
     ------

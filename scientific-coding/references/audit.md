@@ -33,6 +33,7 @@ Report findings by scientific risk and evidence. Distinguish a proven violation 
 - Input and output contracts are explicit and semantically complete.
 - Code is a readable linear narrative with accurate comments beside every semantic operation. Comment blocks have a blank line before them and touch their code. Every TOML section/key is explained.
 - Initial and stage-result data have a concrete structure/meaning/reading guide; in-memory changes are explained inline.
+- File overviews have a truthful text flow diagram and an opening quote line of their own. Function hover documentation follows purpose, 参数, 返回, 处理过程, 副作用; names/types occupy separate lines, explanations are indented, items are spaced, nested fields are expanded, and long prose is wrapped. Verify actual language-service hover when available and state when only source/docstring checks were possible.
 - No scientific transformation is hidden in infrastructure or plotting.
 - No undeclared input affects scientific behavior.
 - Mutation does not obscure lineage.

@@ -1,5 +1,20 @@
 # scientific-code: stage
-"""计算保留试次的组均值差和 bootstrap 区间，发布 AnalysisResult@1。
+"""
+计算保留试次的组均值差和 bootstrap 区间，发布 AnalysisResult@1。
+
+文件流程
+--------
+保留试次 rows + input_binding
+            |
+            +<-- configs/analyze.toml
+            v
+  组均值、均值差、bootstrap 区间
+            |
+            v
+  result.json + summary.md + aggregation.csv
+            |
+            v
+      新产物 + result + binding
 
 输入文件与配置
 --------------
@@ -50,20 +65,20 @@ def bootstrap_mean_difference_ci(control: list[float], treatment: list[float],
     level : float
         区间中心概率，满足 0 < level < 1，例如 0.95。
 
-    处理逻辑
-    --------
-    1. 各组独立有放回抽取与本组等长的样本，重复 B 次。
-    2. 每次计算处理组均值减对照组均值，形成长度为 B 的差值列表。
-    3. 排序后按声明的向下取整索引选取两端，右端索引最多为 B-1。
-    增大 B 减少蒙特卡洛误差，不保证区间变窄。
-
-    产物
+    返回
     ----
     lower : float
         区间下端点，单位为微伏，对应排序后左侧分位数索引。
 
     upper : float
         区间上端点，单位为微伏；与 lower 组成长度为 2 的返回元组。
+
+    处理过程
+    --------
+    1. 各组独立有放回抽取与本组等长的样本，重复 B 次。
+    2. 每次计算处理组均值减对照组均值，形成长度为 B 的差值列表。
+    3. 排序后按声明的向下取整索引选取两端，右端索引最多为 B-1。
+    增大 B 减少蒙特卡洛误差，不保证区间变窄。
 
     副作用
     ------
@@ -92,16 +107,19 @@ def run(rows: list[dict], input_binding: dict, config_path: Path,
     参数
     ----
     rows : list[dict]
-        每行一个试次的 list[dict]，长度为 N。
-        trial_id 为唯一字符串，condition 为 control 或 treatment，
-        amplitude_uv 为有限浮点数，单位为微伏；顺序沿用上游。
-        本函数沿用 ProcessedTrials@1 在上游生成或外部入口建立的保证。
+        每行代表一个试次，列表长度为 N。
+        上游 ProcessedTrials@1 已保证每组至少两个试次，两组长度可以不同。
+        沿用输入的相对顺序；本函数不修改行字典。字段如下：
+        - trial_id：唯一字符串，标识试次。
+        - condition：字符串，值为 control 或 treatment。
+        - amplitude_uv：有限浮点数，单位为微伏。
 
     input_binding : dict
-        包含 path、contract、artifact_hash、manifest_hash 的字典；各值为字符串。
-        path 相对项目根目录，contract 为 ProcessedTrials@1。
-        artifact_hash 绑定数据身份，manifest_hash 绑定完整清单记录。
-        指向本次 rows 的确切来源，不根据一个状态标签猜测数据身份。
+        包含四个字符串字段的来源绑定：
+        - path：相对项目根目录的产物目录路径。
+        - contract：ProcessedTrials@1。
+        - artifact_hash：绑定契约和科学数据身份的哈希。
+        - manifest_hash：绑定完整清单及来源记录的哈希。
 
     config_path : Path
         科学配置文件路径；相对路径按调用时的工作目录读取。
@@ -114,25 +132,36 @@ def run(rows: list[dict], input_binding: dict, config_path: Path,
     review_required : bool
         默认 False；仅在用户选定本阶段暂停时启用待评审记录。
 
-    处理逻辑
+    返回
+    ----
+    result : dict
+        包含以下字段的标量结果字典：
+        - n_control：整数，对照组保留试次数，无量纲。
+        - n_treatment：整数，处理组保留试次数，无量纲。
+        - control_mean_uv：浮点数，对照组均值，单位为微伏。
+        - treatment_mean_uv：浮点数，处理组均值，单位为微伏。
+        - difference_uv：浮点数，处理组减对照组的均值差，单位为微伏。
+        - ci_low_uv：浮点数，均值差区间下端点，单位为微伏。
+        - ci_high_uv：浮点数，均值差区间上端点，单位为微伏。
+        - confidence_level：浮点数，严格位于 0 与 1 之间的区间概率。
+        - n_bootstrap：整数，组内重采样重复次数。
+        - seed：整数，重采样使用的随机种子。
+        - method：字符串，描述统计方法。
+
+        微伏估计值保留四位小数。
+
+    binding : dict
+        包含四个字符串字段的来源绑定：
+        - path：相对项目根目录的产物目录路径。
+        - contract：AnalysisResult@1。
+        - artifact_hash：绑定契约和科学数据身份的哈希。
+        - manifest_hash：绑定完整清单及来源记录的哈希。
+
+    处理过程
     --------
     1. 校验本阶段的重采样次数、种子和区间概率。
     2. 按组形成振幅向量，计算组均值及处理减对照的差值。
     3. 组内有放回重采样得到分位数区间，保存标量结果和试次贡献映射。
-
-    产物
-    ----
-    result : dict
-        n_control、n_treatment 为各组试次数整数。
-        control_mean_uv、treatment_mean_uv、difference_uv、ci_low_uv、ci_high_uv
-        为微伏浮点数；n_bootstrap、seed 为整数，confidence_level 为概率浮点数，
-        method 为方法说明字符串。数值估计保留四位小数。
-
-    binding : dict
-        包含 path、contract、artifact_hash、manifest_hash 的字典；各值为字符串。
-        path 相对项目根目录，contract 为 AnalysisResult@1。
-        artifact_hash 绑定数据身份，manifest_hash 绑定完整清单记录。
-        此处指向新发布的本阶段结果。
 
     副作用
     ------

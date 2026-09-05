@@ -30,6 +30,8 @@ import tomllib
 from pathlib import Path
 from typing import Any, Iterator
 
+import layout_checks
+
 
 def source_evidence(workdir: Path) -> dict[str, Any]:
     """Collect final explanatory/source files separately from generated data and diffs."""
@@ -91,6 +93,48 @@ def clipped(text: str, limit: int, label: str, *, tail: bool = False) -> str:
     return marker + "\n" + text[-limit:] if tail else text[:limit] + "\n" + marker
 
 
+def execution_evidence(trajectory: str) -> list[dict]:
+    """保留整条轨迹的工具执行骨架，避免大段源码挤掉实际读取和最终检查。"""
+    records = []
+    requests = {}
+    for line in trajectory.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "eval_user_followup":
+            records.append({"event": "actual resumed user message", "text": event.get("text")})
+        for item in event.get("message", {}).get("content", []):
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "tool_use":
+                arguments = item.get("input", {})
+                record = {"tool": item.get("name"), "id": item.get("id"), "success": None}
+                if "command" in arguments:
+                    record["command"] = clipped(arguments["command"], 3000, "COMMAND")
+                else:
+                    record["path"] = arguments.get("file_path", arguments.get("path"))
+                requests[item.get("id")] = record
+                records.append(record)
+            elif item.get("type") == "tool_result" and item.get("tool_use_id") in requests:
+                record = requests[item["tool_use_id"]]
+                record["success"] = not item.get("is_error", False)
+                if record["tool"] not in {"Read", "Write", "Edit"}:
+                    record["output"] = clipped(str(item.get("content", "")), 1200, "TOOL OUTPUT")
+    return records
+
+
+def assessment_dimensions(outcomes: dict, judge: dict) -> dict:
+    """机械结果保持权威，只从模型回答接收语义和格式器执行两个维度。"""
+    dimensions = dict(outcomes.get("dimensions", {}))
+    for name in ("semantic_accuracy", "formatter_execution"):
+        if name in judge.get("dimensions", {}):
+            dimensions[name] = judge["dimensions"][name]
+    return dimensions
+
+
 def is_skill_read(command: str) -> bool:
     return bool(re.search(r"\b(cat|type|Get-Content|read_text|readFile)\b", command, re.IGNORECASE)
                 and re.search(r"scientific[-_]coding[/\\]+SKILL\.md", command))
@@ -106,8 +150,35 @@ def outcome_checks(workdir: Path, case: dict[str, Any], before: dict[str, str],
         return created_pipeline_outcome(workdir)
     if kind == "comment_spacing":
         return comment_spacing_outcome(workdir)
+    if kind in {"layout_review", "nested_layout", "resumed_layout", "layout_repair"}:
+        if kind == "nested_layout" or (kind == "layout_repair" and case.get("repair_science") == "nested"):
+            science = layout_checks.nested_science(workdir)
+        elif kind == "layout_repair":
+            science = review_study_outcome(workdir, strict=case.get("repair_science") == "strict", require_docs=False)
+        else:
+            base_case = {**case, "outcome": "resumed_review" if kind == "resumed_layout" else "chinese_review",
+                         "check_review_docs": False}
+            science = outcome_checks(workdir, base_case, before, conversation=conversation)
+        if kind == "layout_repair":
+            if case.get("repair_duplicate_raw"):
+                probe = layout_checks.duplicate_raw_probe(workdir)
+                science["evidence"]["duplicate_raw_probe"] = probe
+                if not probe["pass"]:
+                    science["failures"].append("The explicitly requested raw-ID boundary repair still accepts duplicates")
+            for relative, digest in case.get("preserve_hashes", {}).items():
+                path = workdir / relative
+                if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                    science["failures"].append(f"Repair changed a preserved input/human/previous file: {relative}")
+            if case.get("repair_science") == "strict" and science["evidence"].get("summary", {}).get("user_note") != "人工确认：阈值复核":
+                science["failures"].append("Repair lost the existing human summary annotation")
+            science["pass"] = not science["failures"]
+        layout = layout_checks.check_layout(workdir, case["layout_spec"])
+        return {"pass": science["pass"] and layout["pass"],
+                "failures": science["failures"] + layout["failures"],
+                "dimensions": {"science": science, "layout": layout}}
     if kind in {"chinese_review", "rounds_review", "resumed_review"}:
-        outcome = review_study_outcome(workdir, strict=kind == "resumed_review", require_docs=True)
+        outcome = review_study_outcome(workdir, strict=kind == "resumed_review",
+                                       require_docs=case.get("check_review_docs", True))
         if kind == "resumed_review":
             if not conversation or conversation.get("kind") != "real resumed CLI conversation":
                 outcome["failures"].append("No real resumed user conversation was recorded")
@@ -579,6 +650,44 @@ def judge_case(
         trajectory=clipped(trajectory_text, 50000, "TRAJECTORY", tail=True),
         outcomes=json.dumps(outcomes or {}, ensure_ascii=False),
     )
+    if case.get("layout_spec"):
+        prompt += "\n## Execution records from the full trajectory\n" + clipped(
+            json.dumps(execution_evidence(trajectory_text), ensure_ascii=False), 45000, "EXECUTION RECORDS", tail=True)
+        prompt += """
+
+This NEW layout case additionally requires separate dimensions in your JSON:
+"dimensions": {
+  "semantic_accuracy": {"status": "met" | "unmet" | "unknown", "evidence": "specific functions/claims and implementation facts"},
+  "formatter_execution": {"status": "met" | "unmet" | "unknown", "evidence": "actual script execution, final clean operation, and covered/missed files"}
+}
+Do not award semantic accuracy because headings or type words occur. Independently
+read every scientific function against its docstring: shapes and axes, dictionary
+keys and nesting, unequal group sizes, units (counts are unitless), ordering,
+relative paths, equality boundaries, mutation, return aliases and actual passes
+over data. Each function must explain its own input and return structure locally.
+Check that module opening quotes are on their own line and its character flowchart
+truthfully connects actual inputs, this file's operations and outputs, with relevant
+TOML configuration connected to its affected stage. An arrow alone is not evidence
+of a correct diagram. Assess TOML section/key explanations separately; the required
+file-level diagram belongs to source modules, not to TOML configuration files.
+Assess the fixed Chinese order: concise summary, 参数, 返回, 处理过程, 副作用;
+name and type on one line, indented explanation on the next, blank separation
+between each parameter/return item, individually expanded dictionary fields,
+and numbered logic on separate lines. Mechanical layout results do not prove truth.
+The fixed interface sections apply ONLY to FUNCTION docstrings. Module docstrings
+use their file overview, actual data-flow diagram and input/output/config descriptions.
+Dictionary fields MAY use the template's one-line '- field: type, explanation'
+bullets, without blank lines between bullets; only top-level parameters and returned
+members require a separate indented explanation and blank-separated paragraphs.
+Homogeneous mappings may share field types/units if their actual keys and nesting
+are clearly stated; do not call that a semantic error solely for lacking one bullet
+per repeated leaf. Packed multiple distinct fields and missing local structure differ.
+For formatter execution list exactly which edited source/config languages and files
+the final script operation covered. A clean check or an internal fix+check is enough;
+a filename or a statement claiming execution is not evidence. Missing trajectory
+evidence caused by truncation is unknown, not pass. Either unmet dimension means
+overall pass=false; an unknown required dimension cannot yield pass=true.
+"""
 
     # Pass evidence through stdin: large diffs exceed command argument limits.
     # communicate() closes stdin immediately after this input, so the CLI never waits.
@@ -605,5 +714,13 @@ def judge_case(
         return {"pass": None, "error": "judge returned no JSON", "raw": output[:2000]}
     if verdict.get("pass") is True and "unknown" in verdict.get("criteria", {}).values():
         verdict["pass"] = None
+    if case.get("layout_spec"):
+        dimensions = verdict.get("dimensions", {})
+        statuses = [dimensions.get(name, {}).get("status", "unknown")
+                    for name in ("semantic_accuracy", "formatter_execution")]
+        if "unmet" in statuses:
+            verdict["pass"] = False
+        elif verdict.get("pass") is True and any(status != "met" for status in statuses):
+            verdict["pass"] = None
     verdict["raw"] = output
     return verdict

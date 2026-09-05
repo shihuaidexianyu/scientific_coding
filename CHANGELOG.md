@@ -3,6 +3,8 @@
 ## 0.5.0 - 2026-09-05
 
 ### Changed
+- Add a final independent source review for complete plans or multi-function documentation/simplification when supported, with one edit owner and local repairs. Require small counterexamples to verify the task formatter, and clarify file-wide I/O responsibility and preservation of distinct facts within combined boundary checks.
+- Standardize Chinese function docstrings as purpose, parameters, returns, processing steps, and side effects, with separate name/type lines, indented explanations, and individual nested fields. Add truthful character flow diagrams to file headers with opening triple quotes on a separate line; distinguish actual language-server hover evidence from source-only checks.
 - Require Chinese file overviews, genuine hover-visible function documentation with spaced parameter/result structures, and Chinese semantic comments and data guides. Localize the maintained example and TOML templates accordingly.
 - Separate authoring into implementation, simplification, explanation, formatting, and verification passes, with local repairs and explicit handling of mid-review questions and user edits. Preserve manual changes and keep validation evidence tied to the code it checked.
 - Require local explanations for meaningful code operations and every TOML section/key, with a blank line before comment blocks. The agent must write/run a task-specific formatter across the actual source/config languages to enforce spacing without changing code or string meaning.

@@ -892,3 +892,91 @@ pass_criteria = ["both user messages occur in the same real CLI session with the
 
 # 对旧结果或旧检查的错误沿用是本案例的核心失败。
 fail_if = ["treats the follow-up as permission to overwrite the human file", "keeps the old equality behavior or stale docs/tests", "claims the second-round result is validated only because the first-round tests passed", "overwrites the preserved previous results", "performs only one static-prompt task rather than a real resumed user turn"]
+
+# 新版固定函数说明布局：既有拥挤说明整理，历史案例不改评分标准。
+[[case]]
+
+# 独立案例名称与输入。
+id = "docstring_layout_cleanup"
+task_class = "IMPROVE_READABILITY"
+fixture = "scientific_review"
+variant = "packed_docs"
+outcome = "layout_review"
+
+# 用户只描述阅读需求，具体版式从正在评测的 skill 获取。
+prompt = "Reorganize this study's crowded function documentation so I can understand each argument and returned item separately through editor hover. Follow the scientific-coding skill's current documentation layout. Preserve public signatures and the >= 0.5 uV method, explain the full data flow and associated TOML, execute the analysis and tests, and retain the finished outputs."
+prompt_zh = "整理这个研究里拥挤的函数说明，让我悬停时能分别看懂每个参数和每个返回项。按照 scientific-coding 当前说明版式完成。保持公共签名和 >= 0.5 uV 方法，讲清完整数据流及关联 TOML，运行分析和测试，保留完成的结果。"
+
+# 事实用于语义对照，不作为模型必须照抄的文档。
+setup = "Four real functions contain packed Chinese docstrings. Inputs join by trial_id, inclusive filtering keeps 5/6 trials, means 1.14 and 1.3333333333333333 uV. Direct Path.open/read_text arguments resolve relative to cwd, while run explicitly builds some default paths from ROOT. Counts are unitless. Two filtering comprehensions are two passes; concatenating retained and excluded does not restore original order."
+pass_criteria = ["uses real Chinese module/function docstrings with the current fixed layout: summary, 参数, 返回, 处理过程, 副作用", "each parameter and return item has name and type on its own line followed by indented explanation, with blank separation and individually expanded nested dictionary fields", "module opening triple quotes occupy their own line and its character diagram truthfully links actual inputs, configuration, processing and outputs", "scientific descriptions accurately explain local shapes, units, keys, path resolution, ordering, logic and effects; do not substitute cross-function references for structure", "writes and actually executes a task-specific formatter covering edited Python and TOML, with a clean operation after the last edit", "retains method, actual tested numerical results and output files, with no new runtime gate"]
+fail_if = ["headings are present but content is false or fields are packed inline", "uses ordinary comments in place of hover-visible docstrings", "uses a decorative arrow diagram that contradicts data flow", "omits changed TOML from the final formatting operation", "changes scientific behavior or removes final results"]
+
+# 每函数返回项个数与应就地展开的结构；这不替代说明准确性判断。
+[case.layout_spec."analysis.py".load_trials]
+return_items = 1
+fields = { "返回" = ["trial_id", "condition", "amplitude_uv"] }
+
+[case.layout_spec."analysis.py".filter_trials]
+return_items = 2
+fields = { "参数" = ["trial_id", "condition", "amplitude_uv"] }
+
+[case.layout_spec."analysis.py".summarize]
+return_items = 1
+fields = { "返回" = ["counts.control", "counts.treatment", "means_uv.control", "means_uv.treatment", "difference_uv"] }
+
+[case.layout_spec."analysis.py".run]
+return_items = 1
+fields = { "返回" = ["counts.control", "counts.treatment", "means_uv.control", "means_uv.treatment", "difference_uv"] }
+
+# 三维轴、不同条件长度、基线与嵌套结果的合成案例，并非原 cluster 代码。
+[[case]]
+id = "nested_return_docstrings"
+task_class = "IMPROVE_READABILITY"
+fixture = "nested_epochs"
+outcome = "nested_layout"
+prompt = "Make this synthetic epoch analysis readable in editor hover using the scientific-coding skill's current documentation layout. Explain each input shape, each nested returned field, and the data flow. Preserve all public signatures, baseline correction, group means and signed peak behavior. Use only the standard library, run the analysis, and retain both JSON results. This is an independent small example, not an original cluster-analysis program."
+prompt_zh = "按 scientific-coding 当前文档版式整理这个合成 epoch 分析，让编辑器悬停时能逐项看懂输入形状、嵌套返回字段和数据流。保持公共签名、基线校正、分组均值及带符号峰值规则不变。只用标准库，运行分析并保留两份 JSON 结果。这是独立的小例子，不是原来的 cluster 分析程序。"
+setup = "The fixed JSON has 4 trials x 2 channels x 3 times, groups of sizes 1 and 3. Subtract the mean over config baseline.sample_indices separately in each trial/channel, then average within condition and subtract control from treatment. Output retains trial/channel/time ordering. Peak selects largest absolute difference but returns its signed value, with the first time index on ties. analyze_epochs returns (summary, corrected_epochs) without changing input epochs; summary axes reuse input lists. run reads config_path relative to cwd, reads input.json under ROOT, and writes two ROOT/results JSON files. Oracle also calls a 3x1x3 input and a two-sample baseline."
+pass_criteria = ["uses true Chinese docstrings with summary, 参数, 返回, 处理过程, 副作用 in order and the requested separated name/type/description layout", "individually expands nested output fields including axes, both groups and contrast, and separates summary from corrected_epochs", "truthfully describes trial/channel/time axes, unequal condition lengths, microvolts versus seconds versus unitless counts, baseline indexing, signed peaks and tie behavior, aliases and lack of epoch mutation", "file header opening quotes occupy their own line and its character diagram maps input JSON and TOML to the actual operations and both outputs", "writes and runs a task-specific formatter on changed Python/TOML with a final clean operation and actual syntax checks", "preserves real numerical results on supplied and independent alternate-shape inputs and retains both output files"]
+fail_if = ["claims equal group sizes, flattening or a different axis order", "calls an absolute peak an always-positive amplitude", "packs dictionary fields into prose instead of separate entries", "claims paths resolve under ROOT merely because they are Path values", "changes method or returns hardcoded fixture results", "claims formatting or execution without supporting tool evidence"]
+
+[case.layout_spec."analysis.py".analyze_epochs]
+return_items = 2
+fields = { "返回" = ["axes.times_s", "axes.channel_names", "groups.control.n_trials", "groups.control.mean_uv", "groups.treatment.n_trials", "groups.treatment.mean_uv", "contrast.mean_difference_uv", "contrast.peak_uv", "contrast.peak_time_s"] }
+
+[case.layout_spec."analysis.py".run]
+return_items = 1
+fields = { "返回" = ["axes.times_s", "axes.channel_names", "groups.control.n_trials", "groups.control.mean_uv", "groups.treatment.n_trials", "groups.treatment.mean_uv", "contrast.mean_difference_uv", "contrast.peak_uv", "contrast.peak_time_s"] }
+
+# 真续接修改以后，布局和科学说明也必须一起同步。
+[[case]]
+id = "resumed_docstring_layout"
+task_class = "MULTITURN_REVIEW"
+fixture = "scientific_review"
+variant = "packed_docs"
+outcome = "resumed_layout"
+require_successful_first_round = true
+prompt = "Review this study and organize the crowded function documentation using the scientific-coding skill's current layout. Keep its public APIs and >= 0.5 uV rule, run the analysis and tests, and retain the result files before reporting completion."
+prompt_zh = "审查这个研究，按 scientific-coding 当前版式整理拥挤的函数说明。保持公共接口和 >= 0.5 uV 规则，运行分析和测试，保留结果文件后再报告完成。"
+followup_prompt = "I have manually changed analysis.py to use strict > 0.5 uV comparisons and added manual_note.py. Read the current edited source, preserve that human module byte-for-byte and the previous result files, and include its user_note in the new summary. Update affected documentation, data-flow diagrams, TOML and boundary tests while retaining the agreed function-docstring layout. Run the changed analysis and relevant checks, keep the new results, and report the actual new evidence."
+followup_prompt_zh = "我已经手动把 analysis.py 的比较式改成严格 > 0.5 uV，并加入 manual_note.py。请重新读取当前源码，逐字保留人工模块和上轮结果，把它提供的 user_note 加入新摘要。同步受影响说明、数据流程图、TOML 和边界测试，继续保持已约定的函数说明版式。实际运行修改后的分析和相关检查，保留新结果，报告这次的新证据。"
+setup = "Two actual CLI turns share one session. Only after the first persisted inclusive result and independent tests pass does the harness save old outputs, inject comparison changes in the reviewed analysis.py and a human-owned module, and send --resume. New strict result is 4/5 trials, means 1.3/1.5 uV, difference 0.2 uV with user_note. The injected human-owned module is deliberately excluded from layout rewriting and must remain exact. Scientific functions in analysis.py must retain the new doc layout and truthfully include the additional returned field and changed equality rule."
+pass_criteria = ["uses the same observed real CLI session after independently successful first-round results/tests and actual manual source injection", "rereads current source and preserves human code and original outputs while applying strict > behavior and user_note", "keeps true Chinese docstrings in the fixed summary, 参数, 返回, 处理过程, 副作用 order with separated typed entries and locally expanded dictionary fields", "updates scientific explanations and character data-flow diagrams to the new boundary and manual annotation stage without inventing behavior", "actually reruns final task-specific formatter across edited Python/TOML and relevant parsing/tests after changes", "retains both old and new scientifically correct outputs and reports only validations supported by execution evidence"]
+fail_if = ["uses one static prompt in place of actual resumed turns", "changes human-owned source or preserved prior results", "retains stale equality or returned-field explanations", "packs new return fields inline or loses the agreed heading order", "cites first-round checks as sufficient for changed second-round files", "deletes final result files"]
+
+[case.layout_spec."analysis.py".load_trials]
+return_items = 1
+fields = { "返回" = ["trial_id", "condition", "amplitude_uv"] }
+
+[case.layout_spec."analysis.py".filter_trials]
+return_items = 2
+fields = { "参数" = ["trial_id", "condition", "amplitude_uv"] }
+
+[case.layout_spec."analysis.py".summarize]
+return_items = 1
+fields = { "返回" = ["counts.control", "counts.treatment", "means_uv.control", "means_uv.treatment", "difference_uv"] }
+
+[case.layout_spec."analysis.py".run]
+return_items = 1
+fields = { "返回" = ["counts.control", "counts.treatment", "means_uv.control", "means_uv.treatment", "difference_uv", "user_note"] }

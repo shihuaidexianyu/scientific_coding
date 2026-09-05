@@ -1,5 +1,20 @@
 # scientific-code: stage
-"""按振幅下限筛选试次，发布 ProcessedTrials@1 和排除记录。
+"""
+按振幅下限筛选试次，发布 ProcessedTrials@1 和排除记录。
+
+文件流程
+--------
+原始试次 rows + input_binding
+            |
+            +<-- configs/preprocess.toml
+            v
+  振幅筛选、检查保留组样本量
+            |
+            v
+  data/processed_trials.csv + exclusions.csv
+            |
+            v
+  新产物 + retained + binding
 
 输入文件与配置
 --------------
@@ -33,16 +48,19 @@ def run(rows: list[dict], input_binding: dict, config_path: Path,
     参数
     ----
     rows : list[dict]
-        每行一个试次的 list[dict]，长度为 N。
-        trial_id 为唯一字符串，condition 为 control 或 treatment，
-        amplitude_uv 为有限浮点数，单位为微伏；顺序沿用上游。
-        本函数沿用 RawTrials@1 在上游生成或外部入口建立的保证。
+        每行代表一个试次，列表长度为 N，字段如下：
+        - trial_id：唯一字符串，标识试次。
+        - condition：字符串，值为 control 或 treatment。
+        - amplitude_uv：有限浮点数，单位为微伏。
+
+        沿用输入的相对顺序；本函数不修改行字典。
 
     input_binding : dict
-        包含 path、contract、artifact_hash、manifest_hash 的字典；各值为字符串。
-        path 相对项目根目录，contract 为 RawTrials@1。
-        artifact_hash 绑定数据身份，manifest_hash 绑定完整清单记录。
-        指向本次 rows 的确切来源，不根据一个状态标签猜测数据身份。
+        包含四个字符串字段的来源绑定：
+        - path：相对项目根目录的产物目录路径。
+        - contract：RawTrials@1。
+        - artifact_hash：绑定契约和科学数据身份的哈希。
+        - manifest_hash：绑定完整清单及来源记录的哈希。
 
     config_path : Path
         科学配置文件路径；相对路径按调用时的工作目录读取。
@@ -55,23 +73,24 @@ def run(rows: list[dict], input_binding: dict, config_path: Path,
     review_required : bool
         默认 False；仅在用户选定本阶段暂停时启用待评审记录。
 
-    处理逻辑
-    --------
-    1. 读取并校验本阶段新引入的有限阈值。
-    2. 将原始行分为保留与排除两部分，记录排除原因。
-    3. 筛选后确认每组仍至少两个试次，再保存两张表及来源。
-
-    产物
+    返回
     ----
     retained : list[dict]
         与 rows 字段、单位和相对顺序一致的保留子集，每组至少两个试次。
         返回长度 M 不大于输入长度 N；被移除的行保存在 exclusions.csv。
 
     binding : dict
-        包含 path、contract、artifact_hash、manifest_hash 的字典；各值为字符串。
-        path 相对项目根目录，contract 为 ProcessedTrials@1。
-        artifact_hash 绑定数据身份，manifest_hash 绑定完整清单记录。
-        此处指向新发布的本阶段结果。
+        包含四个字符串字段的来源绑定：
+        - path：相对项目根目录的产物目录路径。
+        - contract：ProcessedTrials@1。
+        - artifact_hash：绑定契约和科学数据身份的哈希。
+        - manifest_hash：绑定完整清单及来源记录的哈希。
+
+    处理过程
+    --------
+    1. 读取并校验本阶段新引入的有限阈值。
+    2. 将原始行分为保留与排除两部分，记录排除原因。
+    3. 筛选后确认每组仍至少两个试次，再保存两张表及来源。
 
     副作用
     ------
