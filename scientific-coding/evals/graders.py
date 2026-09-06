@@ -31,6 +31,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import layout_checks
+import execution_checks
+import expression_checks
 
 
 def source_evidence(workdir: Path) -> dict[str, Any]:
@@ -129,9 +131,15 @@ def execution_evidence(trajectory: str) -> list[dict]:
 def assessment_dimensions(outcomes: dict, judge: dict) -> dict:
     """机械结果保持权威，只从模型回答接收语义和格式器执行两个维度。"""
     dimensions = dict(outcomes.get("dimensions", {}))
+    supplied = judge.get("dimensions", {})
+    if not isinstance(supplied, dict):
+        supplied = {}
     for name in ("semantic_accuracy", "formatter_execution"):
-        if name in judge.get("dimensions", {}):
-            dimensions[name] = judge["dimensions"][name]
+        if name in supplied:
+            value = supplied[name]
+            dimensions[name] = value if isinstance(value, dict) else {
+                "status": "unknown", "raw": value,
+                "evidence": "Judge dimension was not a structured status/evidence object"}
     return dimensions
 
 
@@ -146,6 +154,10 @@ def outcome_checks(workdir: Path, case: dict[str, Any], before: dict[str, str],
     kind = case.get("outcome")
     if not kind:
         return {"pass": None, "reason": "This case requires its semantic rubric judge"}
+    if kind == "execution_records":
+        return execution_checks.execution_outcome(workdir, case)
+    if kind == "shallow_named_steps":
+        return expression_checks.expression_outcome(workdir, case)
     if kind == "created_pipeline":
         return created_pipeline_outcome(workdir)
     if kind == "comment_spacing":
@@ -206,7 +218,8 @@ def outcome_checks(workdir: Path, case: dict[str, Any], before: dict[str, str],
         path = workdir / relative
         if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             failures.append(f"Existing artifact changed or disappeared: {relative}")
-    old_roots = {Path(relative).parts[1] for relative in before if len(Path(relative).parts) > 1}
+    old_roots = {Path(relative).parts[1] for relative in before
+                 if len(Path(relative).parts) > 1 and Path(relative).parts[0] == "artifacts"}
     new_runs = sorted(p for p in (workdir / "artifacts").glob("run_*") if p.is_dir() and p.name not in old_roots)
     diagnostic_runs: list[dict[str, Any]] = []
     if case.get("probe_boundaries"):
@@ -425,7 +438,7 @@ def probe_boundaries(workdir: Path, source_run: Path) -> dict[str, Any]:
     env = {**os.environ, "SCIENTIFIC_CODING_SCRIPTS": str(Path(__file__).resolve().parents[1] / "scripts"), "PYTHONUTF8": "1"}
     with tempfile.TemporaryDirectory(prefix="scientific-boundary-probe-") as temporary:
         target = Path(temporary) / "project"
-        shutil.copytree(workdir, target, ignore=shutil.ignore_patterns("artifacts", ".git", ".claude", ".agents", ".codex", "__pycache__"))
+        shutil.copytree(workdir, target, ignore=shutil.ignore_patterns("artifacts", "executions", ".git", ".claude", ".agents", ".codex", "__pycache__"))
         external = target / "artifacts/external_processed"
         shutil.copytree(source_run / "processed_trials", external)
         config = target / "configs/pipeline.toml"
@@ -438,9 +451,15 @@ def probe_boundaries(workdir: Path, source_run: Path) -> dict[str, Any]:
             failures.append("Independent probe: valid external processed artifact was rejected: " + good.stderr[-1000:])
         data = external / "data/processed_trials.csv"
         data.write_text(data.read_text(encoding="utf-8").replace("control-001", "control-999"), encoding="utf-8")
+        previous_logs = set((target / "executions/attempts").glob("*/run.log"))
         bad = subprocess.run([sys.executable, "pipeline.py"], cwd=target, env=env, capture_output=True, text=True, encoding="utf-8", timeout=60)
         results["tampered_external_returncode"] = bad.returncode
-        if bad.returncode == 0 or "Tracked content differs" not in bad.stderr:
+
+        # 入口可以把完整 stderr 保存到新尝试日志；只读取此次探针新建的文件。
+        new_logs = set((target / "executions/attempts").glob("*/run.log")) - previous_logs
+        diagnostic = bad.stderr + "\n".join(path.read_text(encoding="utf-8") for path in sorted(new_logs))
+        results["tampered_external_new_logs"] = [str(path.relative_to(target)) for path in sorted(new_logs)]
+        if bad.returncode == 0 or "Tracked content differs" not in diagnostic:
             failures.append("Independent probe: tampered external bytes were not rejected for integrity mismatch")
         config.write_text(original, encoding="utf-8")
         code = "from unittest.mock import patch; from pathlib import Path; import pipeline, artifact_io; p=patch.object(artifact_io.integrity, 'verify_artifact_dir', side_effect=AssertionError('duplicate internal input verification')); p.start(); pipeline.run(Path('configs/pipeline.toml'))"
@@ -707,15 +726,19 @@ overall pass=false; an unknown required dimension cannot yield pass=true.
     except (OSError, subprocess.SubprocessError) as error:
         return {"pass": None, "error": f"judge invocation failed: {error}"}
 
+    # 即使模型回答结构错误，也保留原始回答，不让解析器故障抹掉已完成 actor 的证据。
+    (cwd / "judge_raw_output.txt").write_text(output, encoding="utf-8")
+
     verdict = _load_verdict_json(output)
     if result.returncode:
         return {"pass": None, "error": f"judge exited {result.returncode}", "raw": output}
     if verdict is None or type(verdict.get("pass")) not in (bool, type(None)) or "pass" not in verdict:
         return {"pass": None, "error": "judge returned no JSON", "raw": output[:2000]}
-    if verdict.get("pass") is True and "unknown" in verdict.get("criteria", {}).values():
+    criteria = verdict.get("criteria", {})
+    if verdict.get("pass") is True and (not isinstance(criteria, dict) or "unknown" in criteria.values()):
         verdict["pass"] = None
     if case.get("layout_spec"):
-        dimensions = verdict.get("dimensions", {})
+        dimensions = assessment_dimensions({}, verdict)
         statuses = [dimensions.get(name, {}).get("status", "unknown")
                     for name in ("semantic_accuracy", "formatter_execution")]
         if "unmet" in statuses:

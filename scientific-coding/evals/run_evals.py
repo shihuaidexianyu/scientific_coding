@@ -38,6 +38,7 @@ import concurrent.futures
 import json
 import hashlib
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -95,7 +96,7 @@ def materialize_repo(case: dict[str, Any], workdir: Path, mode: str, backend: st
         for item in fixture.iterdir():
             target = workdir / item.name
             if item.is_dir():
-                if item.name != "__pycache__" and not (fixture_name == "minimal_pipeline" and item.name == "artifacts"):
+                if item.name != "__pycache__" and not (fixture_name == "minimal_pipeline" and item.name in {"artifacts", "executions"}):
                     shutil.copytree(item, target, ignore=shutil.ignore_patterns("__pycache__"))
             else:
                 shutil.copy2(item, target)
@@ -133,7 +134,9 @@ def materialize_repo(case: dict[str, Any], workdir: Path, mode: str, backend: st
         shutil.copytree(
             INSTALLED_SKILL_DIR,
             skill_home,
-            ignore=shutil.ignore_patterns("results", "__pycache__", ".git", "artifacts"),
+
+            # 只安装执行技能的资源；独立评分器、参考答案和测试产物不交给被测 agent。
+            ignore=shutil.ignore_patterns("evals", "tests", "results", "__pycache__", ".git", "artifacts", "executions"),
         )
 
     # A maintained source example replaces independent, drifting pipeline copies.
@@ -157,7 +160,18 @@ def materialize_repo(case: dict[str, Any], workdir: Path, mode: str, backend: st
             raise ValueError("unknown condition")
 
 '''
-            source = source.replace("    # Partition the established", duplicate + "    # Partition the established")
+            assignments = [node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Assign)
+                           and any(isinstance(target, ast.Tuple)
+                                   and [getattr(item, "id", None) for item in target.elts] == ["retained", "excluded"]
+                                   for target in node.targets)]
+            if len(assignments) != 1:
+                raise RuntimeError("Cannot identify the preprocessing split for redundant-check injection")
+            lines = source.splitlines(keepends=True)
+            insertion = assignments[0].lineno - 1
+            while insertion > 0 and lines[insertion - 1].lstrip().startswith("#"):
+                insertion -= 1
+            lines.insert(insertion, duplicate)
+            source = "".join(lines)
             path.write_text(source, encoding="utf-8")
         if case.get("initial_run"):
             result = subprocess.run([sys.executable, "pipeline.py"], cwd=workdir,
@@ -173,8 +187,10 @@ def execution_env() -> dict[str, str]:
 
 
 def artifact_snapshot(workdir: Path) -> dict[str, str]:
+    """记录改动前已完成的科学产物和执行记录，供重跑保留性检查使用。"""
     return {p.relative_to(workdir).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in (workdir / "artifacts").rglob("*") if p.is_file()}
+            for directory in ("artifacts", "executions")
+            for p in (workdir / directory).rglob("*") if p.is_file()}
 
 
 def git(workdir: Path, *args: str) -> subprocess.CompletedProcess:
@@ -250,25 +266,37 @@ def run_agent(
 
     started = datetime.now(timezone.utc)
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=workdir,
             env=env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
-            timeout=timeout,
             stdin=subprocess.DEVNULL,
+            start_new_session=os.name != "nt",
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW) if os.name == "nt" else 0,
         )
-        output = result.stdout + ("\n--- stderr ---\n" + result.stderr if result.stderr else "")
-        returncode = result.returncode
-    except subprocess.TimeoutExpired as error:
-        partial = error.stdout or ""
-        output = (partial.decode("utf-8", errors="replace") if isinstance(partial, bytes) else partial)
-        partial_error = error.stderr or ""
-        output += (partial_error.decode("utf-8", errors="replace") if isinstance(partial_error, bytes) else partial_error)
-        output += f"\nTIMEOUT after {timeout}s"
-        returncode = 124
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+            returncode = process.returncode
+        except subprocess.TimeoutExpired:
+
+            # 超时结束本次调用拥有的进程树，防止后台工具继续改写已评分的临时项目。
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                               capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            stdout, stderr = process.communicate()
+            returncode = 124
+        output = stdout + ("\n--- stderr ---\n" + stderr if stderr else "")
+        if returncode == 124:
+            output += f"\nTIMEOUT after {timeout}s"
     except OSError as error:
         output, returncode = f"INVOCATION FAILED: {error}", 127
     elapsed = (datetime.now(timezone.utc) - started).total_seconds()

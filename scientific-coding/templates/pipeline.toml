@@ -19,9 +19,6 @@ config = "configs/preprocess_raw.toml"
 # 声明输出契约；对应结果须附读取说明。
 output_contract = "ProcessedDataset@1"
 
-# 默认连续执行，仅在用户选定的暂停点设为 true。
-requires_approval = false
-
 # 每个输入均声明科学角色及确切契约版本。
 [[stage.inputs]]
 

@@ -1,36 +1,36 @@
 {
   "schema_version": 1,
-  "run_id": "run_20260903_001",
+  "run_id": null,
   "stage": "preprocess_raw",
-  "status": "produced",
-  "git_commit": "0000000000000000000000000000000000000000",
+  "status": "not_run",
+  "execution_record": null,
+  "git_commit": null,
   "script": "stages/preprocess_raw.py",
   "config": {
     "path": "configs/preprocess_raw.toml",
-    "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    "sha256": null
   },
   "input_artifacts": [
     {
       "path": "artifacts/raw_dataset/run_20260902_001",
       "contract": "RawDataset@1",
-      "artifact_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "manifest_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      "artifact_hash": null,
+      "manifest_hash": null
     }
   ],
-  "output_artifact_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-  "python_version": "3.13.7",
-  "library_versions": {
-    "numpy": "2.3.2"
-  },
+  "output_artifact_hash": null,
+  "python_version": null,
+  "library_versions": {},
   "hardware": {
-    "cpu": "record model and core count",
-    "ram_gb": 128,
+    "cpu": null,
+    "ram_gb": null,
     "gpu": null
   },
   "randomness": {
     "seed": null,
     "deterministic_mode": null
   },
-  "started_at_utc": "2026-09-03T10:00:00Z",
-  "finished_at_utc": "2026-09-03T12:00:00Z"
+  "started_at_utc": null,
+  "finished_at_utc": null,
+  "template_note": "空白结构参考；路径按项目填写，身份、环境和时间取实际记录，未知项写明原因。"
 }

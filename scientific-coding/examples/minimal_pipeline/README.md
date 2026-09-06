@@ -1,8 +1,14 @@
 # 从数据到结果的最小示例
 
+这是已有功能集成演示，包含可选的哈希产物协议、外部结果复用和人工暂停，
+不要求新任务复制整套目录或基础设施。它展示已完成版本，不能作为初稿
+预装检查的依据；新增检查统一按[必要性政策](../../references/checks.md)
+在完整逻辑之后论证。已有示例尚未全面整改为新 80 字符与表达式规则，
+其历史测试通过只证明当时检查范围，不能声称全面满足新增规范。
+
 源码文件头、函数文档、语义块注释与 TOML 说明均使用中文。函数采用真正的 docstring，语言服务可在调用处悬停显示参数内容、具体结构、处理逻辑及产物；各参数和部分之间留空行。
 
-本示例研究独立生成的两组试次：保留试次的平均振幅相差多少？默认连续执行，不需要 approval.json 或人工输入确认。Python 3.11+，仅使用标准库。
+本示例研究独立生成的两组试次：保留试次的平均振幅相差多少？默认连续执行，不需要 approval.json 或人工输入确认。Python 3.11+，科学计算仅使用标准库；Windows 若已有 psutil 则用它读取进程峰值 RSS，未安装时保存未采集原因，Linux/macOS 使用标准库 resource。
 
 ## 最初有什么数据
 
@@ -31,7 +37,19 @@
 python pipeline.py
 ```
 
-程序打印一个新的 `artifacts/run_<id>/`，其中有 raw_trials、processed_trials、analysis_result 和最终图。再次执行会新建运行目录，保留旧结果。运行目录 ID 和执行时间不会进入科学数据身份哈希。同种子、同配置、同契约的科学结果可复现，运行元数据哈希可以不同。
+入口打印新尝试的日志和记录路径。`execution.json` 的 `progress.result_path` 指向新 `artifacts/run_<id>/`，其中有 raw_trials、processed_trials、analysis_result 和最终图。再次执行会新建尝试和运行目录，保留旧结果。运行目录 ID 和执行时间不会进入科学数据身份哈希。同种子、同配置、同契约的科学结果可复现，运行元数据哈希可以不同。
+
+每次命令留下 `executions/attempts/<id>/run.log`、`execution.json`、`progress.json`，并在 `executions/index/<id>.json` 产生独立索引。`run.log` 合并完整 stdout/stderr 与异常堆栈，使用 UTF-8 Python 输出；`execution.json` 保存 UTC 起止、实际子进程退出码、墙钟时间、来源路径与阶段信息。读取方式是 `json.loads(path.read_text(encoding="utf-8"))`；批量查询时遍历 index 下各 JSON 即可，不竞争同一个追加文件。
+
+正常、失败、暂停、取消和启动失败分别记录。失败仍保留日志与已完成阶段，可能已有部分科学产物；只有 `status=succeeded` 且阶段完成才代表本次完整执行，仍不代表统计显著。未完成的记录不会自动改成成功。配置解析及业务模块导入在建立日志后进行，报错也可追溯。直接导入 `run()` 供嵌入和测试，记录由调用它的外部入口负责，内部科学函数不各自建立日志。
+
+CPU 秒数覆盖工作进程的编排区间；峰值 RSS 覆盖该新进程的整个寿命，包括模块导入，不含父记录器和子进程。各阶段时间包含其读盘、计算和发布；本例无 GPU。无法采集的资源字段为 null，并保存具体原因。科学来源继续使用每个产物已有的 run.json；失败前还没有产物时，可从尝试中的 snapshots 读取启动源码和实际读入的配置原始字节，即使 TOML 解析失败也保留。副本使用 .snapshot 后缀，配套 .source.json 写原路径、SHA-256 和相对副本路径；它们只用于来源保存，不作为待执行源码或重复数据校验。
+
+## 运算时间与效率
+
+设 N 为保留试次数，B 为 bootstrap 次数，N0 为最初生成试次数。科学计算时间为 O(N0 + BN + B log B)，其中重采样约为 BN，B log B 来自排序 bootstrap 差值；内存为 O(N0 + B)，还包括 Python 行字典和序列化临时对象。完整运行还包含解释器启动、文件读写、来源记录和哈希成本，这些在本例的小数据下可能占主要部分。
+
+默认 N0=80、B 取 configs/analyze.toml 的 n_bootstrap，单个科学 worker，不使用 GPU。目标机器未校准时不能可靠给出秒数；可先执行本例，从 execution.json 取 wall_time_s、各阶段时间与峰值 RSS，再改变一个规模（例如 B）验证扩展趋势。一次小样本运行不能证明大型数据的吞吐量。K 个相似独立任务使用 W 个 worker 时，ceil(K/W) × 单次时间只是理想近似，实际还受 I/O、内存争用和长尾影响。
 
 ```bash
 python ../../scripts/scientific_code_lint.py . --full-artifact-checks

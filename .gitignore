@@ -9,3 +9,4 @@ suggestion.md
 
 # Regenerated example results live in fresh run directories.
 scientific-coding/examples/minimal_pipeline/artifacts/
+scientific-coding/examples/minimal_pipeline/executions/

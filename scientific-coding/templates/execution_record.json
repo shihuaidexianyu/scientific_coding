@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "attempt_id": "由执行入口生成的新编号",
+  "experiment_id": "所属实验或参数组合标识，重试沿用它",
+  "status": "running",
+  "started_at_utc": null,
+  "finished_at_utc": null,
+  "wall_time_s": null,
+  "exit_code": null,
+  "command": [],
+  "cwd": null,
+  "provenance": {
+    "config_path": null,
+    "effective_config_record": null,
+    "input_code_environment_records": []
+  },
+  "log_path": null,
+  "record_path": null,
+  "code_at_launch": [],
+  "config_snapshots": [],
+  "input_bindings": [],
+  "progress": {
+    "status": "running",
+    "current_stage": null,
+    "stages": [],
+    "result_path": null,
+    "error": null,
+    "resources": null
+  },
+  "scientific_outcome": "not_assessed",
+  "template_note": "仅为结构示意。状态区分运行中、成功、失败、取消、主动暂停和启动失败。实际值由运行采集；缺失项记录原因。索引条目引用本记录与日志，不能把模板当成真实运行。"
+}

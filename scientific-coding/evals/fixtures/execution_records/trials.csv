@@ -1,0 +1,10 @@
+trial_id,condition,amplitude_uv
+c0,control,0.2
+c1,control,0.5
+c2,control,1.0
+c3,control,1.7
+t0,treatment,0.1
+t1,treatment,0.5
+t2,treatment,1.4
+t3,treatment,2.0
+t4,treatment,2.7

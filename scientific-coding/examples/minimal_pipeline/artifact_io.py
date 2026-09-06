@@ -26,6 +26,8 @@ PROJECT_ROOT 为本文件所在目录。SCIENTIFIC_CODING_SCRIPTS 仅定位共�
 发布函数写调用方给定的数据文件，以及 artifact_contract.toml、config.toml、
 run.json、manifest.json；只有显式评审点才额外生成待评审记录。
 其余序列化函数返回 bytes，读取函数返回字典或行列表；不执行科学计算。
+CLI 的配置读取另外在当前 executions 尝试中保存原始配置字节，解析失败也保留；
+这些诊断快照不参与科学产物封存，也不改变 TOML 参数。
 """
 
 # 标准库负责文件读写、执行环境记录和共享工具定位。
@@ -84,10 +86,18 @@ def read_config(path: Path) -> dict:
     副作用
     ------
     读取一份文件，不修改它；语法或读取错误由解析器和文件 API 报出。
+    运行入口提供 SCIENTIFIC_EXECUTION_DIR 时，解析前另存已读取字节的来源快照。
     """
 
+    # 先保存实际读取的配置字节；即使随后语法或科学参数解析失败也有来源。
+    content = path.read_bytes()
+    attempt = os.environ.get("SCIENTIFIC_EXECUTION_DIR")
+    if attempt:
+        from execution import save_snapshot
+        save_snapshot(Path(attempt), path, content, "config_at_read")
+
     # TOML 解析器负责语法与类型解析，辅助函数不重复检查。
-    return tomllib.loads(path.read_text(encoding="utf-8"))
+    return tomllib.loads(content.decode("utf-8"))
 
 
 def csv_bytes(rows: list[dict], columns: list[str]) -> bytes:
@@ -362,6 +372,7 @@ def load_external_artifact(directory: Path, expected_contract: str) -> tuple[obj
     副作用
     ------
     读取并散列外部文件，不修改产物；核验或契约不匹配时抛出明确异常。
+    CLI 执行时在当前尝试保存已经核验的输入绑定；读取契约也保留来源快照。
     """
 
     # 外部文件可能已被修改，因此在进入流程的此处核验一次。
@@ -374,6 +385,15 @@ def load_external_artifact(directory: Path, expected_contract: str) -> tuple[obj
         raise ValueError(f"Expected {expected_contract}, got {binding['contract']}")
     if not integrity.review_satisfied(directory, manifest):
         raise ValueError("This input awaits the user-selected human review")
+
+    # 保存本次入口已经得到的精确来源；下游发布前失败也不会丢失输入身份。
+    attempt = os.environ.get("SCIENTIFIC_EXECUTION_DIR")
+    if attempt:
+        from execution import write_json
+        inputs_dir = Path(attempt) / "input_bindings"
+        inputs_dir.mkdir(exist_ok=True)
+        identity = binding["manifest_hash"].split(":")[-1]
+        write_json(inputs_dir / (identity + ".json"), {"role": expected_contract, **binding})
 
     # 按已核验的字段声明转换 CSV 数值；JSON 保留解析后的类型。
     contract = read_config(directory / "artifact_contract.toml")

@@ -1,6 +1,6 @@
 interface:
   display_name: "Scientific Coding"
   short_description: "Write readable, annotated scientific pipelines"
-  default_prompt: "使用 $scientific-coding 分轮完成这条流水线：文件头用独占一行的开引号和字符流程图，函数按用途、参数、返回、处理过程、副作用提供分节缩进的中文悬停文档；复用已有保证，编写并执行各语言注释格式脚本，核验最终代码，接入我的中途改动并连续完成目标。"
+  default_prompt: "使用 $scientific-coding 完成任务：先写原始逻辑，整体完成后才论证必要检查；保持中文局部说明、浅层表达式与 80 字符行宽，保留运行记录并交代成本。"
 policy:
   allow_implicit_invocation: true

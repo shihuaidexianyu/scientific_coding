@@ -1,37 +1,37 @@
 {
   "schema_version": 1,
   "stage": "permutation_analysis",
-  "representative_workload": "Describe fixed data, config, sample count, and permutation count.",
+  "representative_workload": null,
   "scientific_equivalence": {
     "reference_implementation": "stages/permutation_analysis.py:run_one_permutation_reference",
     "optimized_implementation": "stages/permutation_analysis.py:run_one_permutation",
-    "criterion": "State the domain-justified numerical tolerance or exact invariant.",
-    "result": "pass"
+    "criterion": null,
+    "result": "not_assessed"
   },
   "environment": {
-    "git_commit": "0000000000000000000000000000000000000000",
-    "python_version": "3.13.7",
+    "git_commit": null,
+    "python_version": null,
     "library_versions": {},
     "hardware": {}
   },
   "reference": {
-    "end_to_end_wall_time_s": 259200.0,
-    "peak_ram_gb": 40.0,
+    "end_to_end_wall_time_s": null,
+    "peak_ram_gb": null,
     "peak_vram_gb": null,
     "profile": {
-      "dominant_hotspot": "independent permutation computation",
-      "fraction_of_pipeline": 0.92
+      "dominant_hotspot": null,
+      "fraction_of_pipeline": null
     }
   },
   "optimized": {
-    "end_to_end_wall_time_s": 25200.0,
-    "peak_ram_gb": 72.0,
+    "end_to_end_wall_time_s": null,
+    "peak_ram_gb": null,
     "peak_vram_gb": null
   },
-  "pipeline_speedup": 10.2857,
-  "latency_class_before": "multi-day",
-  "latency_class_after": "same-day",
-  "cognitive_complexity_added": "Describe the new execution complexity and retained reference path.",
-  "decision": "accept"
+  "pipeline_speedup": null,
+  "latency_class_before": null,
+  "latency_class_after": null,
+  "cognitive_complexity_added": null,
+  "decision": "not_assessed",
+  "template_note": "尚未测量或核验；按实际证据填写，空模板不能作为优化已通过的依据。"
 }
-

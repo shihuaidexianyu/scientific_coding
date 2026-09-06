@@ -1,14 +1,17 @@
 {
-  "wall_time_s": 7200.0,
-  "cpu_time_s": 6800.0,
-  "peak_ram_gb": 42.5,
-  "peak_vram_gb": null,
-  "substeps": {
-    "load_s": 420.0,
-    "preprocess_s": 1800.0,
-    "core_computation_s": 4500.0,
-    "aggregate_s": 300.0,
-    "save_s": 180.0
-  }
+  "measurement_kind": "unmeasured",
+  "wall_time_s": null,
+  "cpu_time_s": null,
+  "cpu_scope": null,
+  "peak_ram_bytes": null,
+  "ram_scope": null,
+  "ram_measurement_method": null,
+  "sampling_interval_s": null,
+  "peak_vram_bytes": null,
+  "vram_scope": null,
+  "substeps": [],
+  "unavailable_reasons": {
+    "measurements": "这是空白模板，尚未运行；请填入实际测量，无法采集时逐项说明原因。"
+  },
+  "estimate_record": null
 }
-

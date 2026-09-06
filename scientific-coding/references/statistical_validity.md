@@ -19,9 +19,9 @@ Do not infer exchangeability solely from participant identity: within-block and 
 
 Ignoring clustering can understate uncertainty, but its magnitude is not a universal multiple of the number of clusters. In a simple equal-size exchangeable-cluster setting the variance design effect is `1 + (m - 1) * rho`; applicability depends on the design and estimator. See [CONSORT cluster-trial methods](https://www.bmj.com/content/328/7441/702). State the relevant assumptions instead of copying this formula into unrelated analyses.
 
-## Checks that protect the actual inference
+## Author review of the actual inference
 
-Report n with its unit and relevant cluster/group counts. Do not confuse row count with independent information or claim every model's effective sample size equals a simple count. Check leakage and group overlap at the split/fit boundary where they can arise; reuse those guarantees internally.
+Report n with its unit and relevant cluster/group counts. Do not confuse row count with independent information or claim every model's effective sample size equals a simple count. Review the split/fit design for leakage and overlap using the actual construction and relevant offline tests. This authoring responsibility does not automatically require runtime assertions: decide those only after the logical path is complete, using [checks.md](checks.md), and reuse established guarantees internally.
 
 Account for data-driven selection in inference through valid independent data, nested resampling, or an appropriate selective-inference method. State each test family's multiplicity policy and interpretation; a per-comparison disclaimer does not create familywise control.
 

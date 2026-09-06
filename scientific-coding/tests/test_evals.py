@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 EVALS = Path(__file__).resolve().parents[1] / "evals"
 sys.path.insert(0, str(EVALS))
@@ -27,6 +27,17 @@ class VerdictTests(unittest.TestCase):
         self.assertIs(merged["science"]["pass"], True)
         self.assertEqual(merged["semantic_accuracy"]["status"], "unknown")
         self.assertEqual(merged["formatter_execution"]["status"], "met")
+
+    def test_malformed_judge_dimensions_are_unknown_without_losing_raw_output(self):
+        reply = json.dumps({"result": json.dumps({"pass": True, "criteria": {},
+            "dimensions": {"semantic_accuracy": "met", "formatter_execution": {"status": "met"}}})})
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(graders.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, reply, "")):
+                value = graders.judge_case(run_evals.judge_command("claude"), {"layout_spec": {"analysis.py": {}}}, "", {}, "", root)
+            self.assertIsNone(value["pass"])
+            self.assertEqual((root / "judge_raw_output.txt").read_text(encoding="utf-8"), reply)
+            self.assertEqual(graders.assessment_dimensions({}, value)["semantic_accuracy"]["status"], "unknown")
 
     def verdict(self, **changes):
         value = {"linter": {"errors": 0}, "deterministic_violations": [],
@@ -92,8 +103,8 @@ class VerdictTests(unittest.TestCase):
 
     def test_judge_unknown_criterion_cannot_pass_and_raw_is_saved(self):
         reply = json.dumps({"result": json.dumps({"pass": True, "criteria": {"actual output": "unknown"}})})
-        with patch.object(graders.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, reply, "")) as invoked:
-            value = graders.judge_case(run_evals.judge_command("claude"), {}, "", {}, "", Path.cwd())
+        with tempfile.TemporaryDirectory() as temporary, patch.object(graders.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, reply, "")) as invoked:
+            value = graders.judge_case(run_evals.judge_command("claude"), {}, "", {}, "", Path(temporary))
         self.assertIsNone(value["pass"])
         self.assertEqual(value["raw"], reply)
         self.assertIn("input", invoked.call_args.kwargs)
@@ -139,8 +150,8 @@ class OutcomeTests(unittest.TestCase):
 
     def test_new_judge_dimensions_cannot_be_silently_omitted(self):
         reply = json.dumps({"result": json.dumps({"pass": True, "criteria": {"layout": "met"}})})
-        with patch.object(graders.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, reply, "")):
-            value = graders.judge_case(run_evals.judge_command("claude"), {"layout_spec": {"analysis.py": {}}}, "", {}, "", Path.cwd())
+        with tempfile.TemporaryDirectory() as temporary, patch.object(graders.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, reply, "")):
+            value = graders.judge_case(run_evals.judge_command("claude"), {"layout_spec": {"analysis.py": {}}}, "", {}, "", Path(temporary))
         self.assertIsNone(value["pass"])
 
     def test_empty_toml_comment_and_machine_directive_are_not_english_prose(self):
@@ -178,7 +189,9 @@ class OutcomeTests(unittest.TestCase):
     def test_resume_uses_same_real_cli_session_argument(self):
         with tempfile.TemporaryDirectory() as temporary:
             returned = subprocess.CompletedProcess([], 0, '{"type":"result","session_id":"session-example"}', "")
-            with patch.object(run_evals.subprocess, "run", return_value=returned) as invoked:
+            process = Mock(returncode=0)
+            process.communicate.return_value = (returned.stdout, returned.stderr)
+            with patch.object(run_evals.subprocess, "Popen", return_value=process) as invoked:
                 run_evals.run_agent("claude", "first user turn", Path(temporary), 10, session_id="session-example")
                 self.assertIn("--session-id", invoked.call_args.args[0])
                 run_evals.run_agent("claude", "later user change", Path(temporary), 10, session_id="session-example", resume=True)
@@ -186,6 +199,30 @@ class OutcomeTests(unittest.TestCase):
                 self.assertEqual(command[command.index("--resume") + 1], "session-example")
                 self.assertNotIn("--session-id", command)
             self.assertEqual(run_evals.observed_session_ids(returned.stdout), ["session-example"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "此探针通过 Linux /proc 核验实际子进程状态")
+    def test_actor_timeout_stops_owned_child_and_preserves_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            actor = root / "actor.py"
+            actor.write_text("import subprocess,sys,time\n"
+                             "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(600)'])\n"
+                             "print('CHILD_PID='+str(child.pid),flush=True)\n"
+                             "print('stderr-before-timeout',file=sys.stderr,flush=True)\n"
+                             "time.sleep(600)\n", encoding="utf-8")
+            with patch.object(run_evals, "agent_command", return_value=[sys.executable, str(actor)]):
+                trajectory, returncode, elapsed = run_evals.run_agent("claude", "probe", root, 1)
+            self.assertEqual(returncode, 124)
+            self.assertIn("stderr-before-timeout", trajectory)
+            self.assertLess(elapsed, 10)
+            child_pid = int(trajectory.split("CHILD_PID=", 1)[1].splitlines()[0])
+            state_path = Path(f"/proc/{child_pid}/stat")
+            try:
+                process_state = state_path.read_text()
+            except (FileNotFoundError, ProcessLookupError):
+                process_state = None
+            if process_state is not None:
+                self.assertEqual(process_state.split(") ", 1)[1][0], "Z")
 
     def test_spacing_fixture_oracle_preserves_multiline_strings_and_method(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -238,6 +275,26 @@ class OutcomeTests(unittest.TestCase):
             run_evals.materialize_repo({"fixture": "plot_scientific_computation"}, root, "baseline", "mock")
             self.assertTrue((root / "artifacts/analysis_result/run_001/accuracy_by_subject.csv").is_file())
 
+    def test_redundant_check_fixture_really_injects_all_three_guards(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_evals.materialize_repo({"fixture": "minimal_pipeline", "variant": "redundant_checks"}, root, "baseline", "mock")
+            source = (root / "stages/preprocess.py").read_text(encoding="utf-8")
+            for marker in ("duplicate trial identity", "invalid amplitude", "unknown condition"):
+                self.assertEqual(source.count(marker), 1)
+            result = subprocess.run([sys.executable, "pipeline.py"], cwd=root, env=run_evals.execution_env(), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_installed_actor_skill_excludes_independent_graders(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_evals.materialize_repo({"fixture": "scientific_review"}, root, "explicit", "claude")
+            installed = root / ".claude/skills/scientific-coding"
+            self.assertTrue((installed / "SKILL.md").is_file())
+            self.assertTrue((installed / "references/execution.md").is_file())
+            self.assertFalse((installed / "evals").exists())
+            self.assertFalse((installed / "tests").exists())
+
     def test_no_run_is_a_positive_outcome_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             self.assertIs(graders.outcome_checks(Path(temporary), {"outcome": "continuous"}, {})["pass"], False)
@@ -269,6 +326,7 @@ class OutcomeTests(unittest.TestCase):
             root = Path(temporary)
             run_evals.materialize_repo({"fixture": "minimal_pipeline", "initial_run": True}, root, "baseline", "mock")
             before = run_evals.artifact_snapshot(root)
+            self.assertTrue(any(name.startswith("executions/") and name.endswith("run.log") for name in before))
             modified = root / next(iter(before))
             modified.write_bytes(b"changed")
             outcome = graders.outcome_checks(root, {"outcome": "continuous"}, before)
@@ -365,6 +423,24 @@ def split(rows: list[dict], floor_uv: float) -> tuple[list, list]:
             self.assertIs(layout_checks.check_layout(root, specification)["pass"], True)
             path.write_text(source.replace("+<--", "配置传入"), encoding="utf-8")
             self.assertIs(layout_checks.check_layout(root, specification)["pass"], True)
+
+    def test_header_template_preserves_science_and_native_empty_error(self):
+        from statistics import StatisticsError
+
+        template_path = EVALS.parent / "templates/stage_header.md"
+        template = template_path.read_text(encoding="utf-8")
+        source = template.split("```python\n", 1)[1].split("```", 1)[0]
+        namespace = {}
+        exec(compile(source, str(template_path), "exec"), namespace)
+        summarize = namespace["summarize_amplitudes"]
+        values = [0.2, 0.5, 1.5]
+        retained, result = summarize(values, 0.5)
+        self.assertEqual(retained, [0.5, 1.5])
+        self.assertEqual(result, {"count": 2, "mean_uv": 1.0})
+        self.assertEqual(values, [0.2, 0.5, 1.5])
+        with self.assertRaises(StatisticsError):
+            summarize(values, 2.0)
+        self.assertTrue(all(len(line) <= 80 for line in source.splitlines()))
 
     def test_nested_bullet_fields_support_hierarchy_and_explicit_paths(self):
         failures = []

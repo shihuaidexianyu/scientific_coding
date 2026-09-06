@@ -32,7 +32,8 @@ data/trials.csv（调用方读取）
 输入文件与数据
 --------------
 调用方读取 UTF-8 CSV 文件 data/trials.csv 的 amplitude_uv 列，
-在外部入口将其转换为有限浮点数列表，再传给本文件中的函数。
+在入口将其转换为浮点数列表，再传给本文件中的函数。
+本方法假设数值有限；转换本身不证明这一假设已验证。
 每个元素代表一个试次，单位为微伏；保持 CSV 原始行顺序。
 
 关联配置
@@ -43,8 +44,8 @@ data/trials.csv（调用方读取）
 加工逻辑
 --------
 1. 保留振幅大于或等于阈值的试次。
-2. 如果筛选后没有样本，给出明确错误。
-3. 计算保留数量和算术均值，交给调用方保存。
+2. 计算保留数量和算术均值，空样本时由标准库自然报错。
+3. 构造返回结构，交给调用方保存。
 
 产物与文件
 ----------
@@ -52,8 +53,14 @@ data/trials.csv（调用方读取）
 本文件不直接读写文件；调用方负责将汇总写入声明的结果目录。
 """
 
+# 标准库负责均值计算及空样本的正常异常，不另加同义预检。
+from statistics import mean
 
-def summarize_amplitudes(amplitudes_uv: list[float], floor_uv: float) -> tuple[list[float], dict]:
+
+def summarize_amplitudes(
+    amplitudes_uv: list[float],
+    floor_uv: float,
+) -> tuple[list[float], dict]:
     """按阈值筛选试次，计算保留样本的数量与平均振幅。
 
     参数
@@ -61,11 +68,11 @@ def summarize_amplitudes(amplitudes_uv: list[float], floor_uv: float) -> tuple[l
     amplitudes_uv : list[float]
         一维试次振幅列表，长度为试次数 N，单位为微伏。
         顺序对应输入 CSV 的行顺序，例如 [0.2, 0.8, 1.2]。
-        调用方已在外部入口保证每个元素是有限浮点数。
+        方法适用于有限浮点数；这项输入假设不是已验证的声明。
 
     floor_uv : float
         保留阈值，单位为微伏；来自配置中的 amplitude_floor_uv。
-        小于阈值时排除，等于阈值时保留。调用方已保证阈值有限。
+        小于阈值时排除，等于阈值时保留；方法采用有限阈值。
 
     返回
     ----
@@ -83,23 +90,22 @@ def summarize_amplitudes(amplitudes_uv: list[float], floor_uv: float) -> tuple[l
     处理过程
     --------
     1. 按原顺序保留振幅不低于 floor_uv 的元素。
-    2. 筛选可能清空列表，因此在这一步检查是否还有保留样本。
-    3. 计算保留数量及算术均值，不重复检查已确定的输入数值类型。
+    2. 计算保留数量，使用标准库 mean 计算算术均值。
+    3. 组装汇总字典，返回保留列表与汇总。
 
     副作用
     ------
-    不修改传入列表，不读写文件；没有保留样本时抛出 ValueError。
+    不修改传入列表，不读写文件。
+    没有保留样本时，mean 自然抛出 StatisticsError，不另加同义检查。
     """
 
     # 按阈值筛选，列表推导保留原有相对顺序和数值单位。
     retained = [value for value in amplitudes_uv if value >= floor_uv]
 
-    # 筛选可能移除全部样本，此时均值没有定义。
-    if not retained:
-        raise ValueError("阈值筛选后没有可用于计算均值的试次")
-
     # 对保留试次汇总数量和算术均值，并分别返回列表与汇总字典。
-    summary = {"count": len(retained), "mean_uv": sum(retained) / len(retained)}
+    retained_count = len(retained)
+    retained_mean_uv = mean(retained)
+    summary = {"count": retained_count, "mean_uv": retained_mean_uv}
     return retained, summary
 ```
 

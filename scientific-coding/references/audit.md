@@ -1,109 +1,41 @@
-# Scientific Pipeline Audit
+# 作者核验与科学代码评审
 
-Contents: Audit Objective · Audit Procedure · Audit Checklist · Deterministic Linter · Scientific Diff · Definition of Done
+用于用户要求的审计或较大任务的最后一轮。先读当前代码、配置和实际数据，
+再看作者的完成声明。只评审本次范围；以下项目按适用性选择，不是运行时门控。
 
-Read this reference for `AUDIT_STAGE`, completion review, or checking the boundary around `INFRASTRUCTURE` work.
+## 先回答实际问题
 
-## Audit Objective
-
-Audit the cognitive and semantic path from intended method to source to execution. This is not a conventional style or refactoring review. Do not recommend abstractions, file splitting, generic utilities, performance work, or checkpointing without scientific or measured operational justification.
-
-## Audit Procedure
-
-1. State the scientific purpose and reconstruct the top-level transformation sequence.
-2. Identify declared inputs, effective config, code revision, and output contract.
-3. Trace stable sample IDs and every change in sample membership.
-4. Check stage boundaries and reject stage-to-stage Python imports.
-5. Compare scientific branches and look for method differences hidden behind config conditionals.
-6. Look for hidden transformations in helpers, views, callbacks, mutation, caches, and fallbacks.
-7. Look for hidden inputs from environment, home directories, `latest/`, time, network, or undocumented global files.
-8. Locate where representation, units, coordinates, time, sample semantics, and joins are established; check only facts that are new or may have become invalid.
-9. Check complete publication, fresh run paths, and necessary integrity verification; human review is required only at user-selected points.
-10. Remove each defensive check whose error is already excluded and cannot have been reintroduced. Check that no helper or loop repeats a gate.
-11. Check that optimization has representative before/after end-to-end evidence and reference equivalence.
-12. Check that resumability has restart-loss justification and resume equivalence.
-13. Check result provenance and the documented analysis/rendering boundary, including any explicitly requested combined-file layout.
-14. Run the agent-written comment formatter/check over the task's source and configuration languages after editing; verify syntax/meaning is preserved. Run relevant scientific tests and other deterministic checks.
-
-Report findings by scientific risk and evidence. Distinguish a proven violation from a heuristic concern or missing evidence.
-
-## Audit Checklist
-
-- Scientific purpose is explicit.
-- Input and output contracts are explicit and semantically complete.
-- Code is a readable linear narrative with accurate comments beside every semantic operation. Comment blocks have a blank line before them and touch their code. Every TOML section/key is explained.
-- Initial and stage-result data have a concrete structure/meaning/reading guide; in-memory changes are explained inline.
-- File overviews have a truthful text flow diagram and an opening quote line of their own. Function hover documentation follows purpose, 参数, 返回, 处理过程, 副作用; names/types occupy separate lines, explanations are indented, items are spaced, nested fields are expanded, and long prose is wrapped. Verify actual language-service hover when available and state when only source/docstring checks were possible.
-- No scientific transformation is hidden in infrastructure or plotting.
-- No undeclared input affects scientific behavior.
-- Mutation does not obscure lineage.
-- Materially different procedures use separate stage implementations.
-- Abstractions name scientific concepts rather than engineering patterns.
-- Each retained check protects a still-unexcluded failure at its owning boundary; guarantees are reused while valid.
-- New configuration is annotated TOML; existing formats are preserved with explicit effective values.
-- Stable sample identities and exclusion reasons remain traceable.
-- Published results are preserved in fresh runs and traceable; optional review decisions bind the exact result.
-- Randomness and experiment-design artifacts are reproducible.
-- Performance and checkpoint complexity have measured justification.
-
-## Deterministic Linter
-
-Run:
-
-```bash
-python <skill-dir>/scripts/scientific_code_lint.py <project-root> --changed-only
-```
-
-Use `--base-ref origin/main` in CI to diff against the merge base (a clean PR checkout has no working-tree changes, so plain `--changed-only` would check nothing). Use `--strict-warnings` in CI once existing warnings have been triaged. Use `--format json` for machine-readable output. Static AST checks cannot prove semantic correctness; combine them with contract and scientific-invariant tests.
-
-Which files count as stages or views is decided by, in order: an in-file marker (`# scientific-code: stage` / `view`), the project's `scientific-code.toml` scope roots (see [the template](../templates/scientific-code.toml)), then naming conventions (`stages/` directories, common stage/view file stems). Infrastructure roots declared in the config are exempt from the naming-discipline heuristics. Declare the scope explicitly whenever the project layout does not match the conventions. When the lint root has no `scientific-code.toml` — or one with an empty `[scope]` — the nearest nested project config is used instead (monorepo layout), and its roots apply relative to that project's directory, not to the lint root.
-
-Artifact integrity checks run in two modes. The default metadata mode validates schema, paths, derived hashes, and approval binding without reading payload content, so lint stays cheap on large data. `--full-artifact-checks` additionally re-hashes finalized artifact payloads and recorded input artifact payloads; use it for release verification or scheduled integrity audits, not on every lint run.
-
-Hard errors:
-
-| Code | Meaning |
+| 关注点 | 核验内容 |
 |---|---|
-| `SC000` | source or project configuration cannot be read or parsed, so checks cannot run reliably |
-| `SC001` | stage imports another stage implementation, directly or through a chain of local modules |
-| `SC003` | finalized artifact hashes or an optional approval binding disagree |
-| `SC004` | an artifact candidate is missing or has an unreadable manifest |
-| `SC005` | a recorded input is invalid/hash-incompatible or fails an explicitly requested review point; in `--full-artifact-checks` mode also fires when the input payload no longer matches its manifest |
-| `SC006` | a view imports a scientific stage implementation, directly or transitively |
-| `SC007` | tracked artifact content differs from its finalized manifest (payload comparison requires `--full-artifact-checks`) |
-| `SC008` | a formal non-acquisition stage performs a known network call |
+| 方法与结果 | 能否沿真实数据重建计算？科学单位、对齐、筛选、随机与推断是否成立？ |
+| 检查必要性 | 初稿是否预装防御？每个最终检查是否符合 [准入依据](checks.md)？原生错误是否已经足够？ |
+| 可读性 | 按 [readability.md](readability.md) 核对局部说明、函数接口、80 字符、浅层表达式与单职责循环；不能只统计注释或行数 |
+| 来源与边界 | 是否有未声明输入、样本身份丢失、隐蔽科学分支或跨阶段实现依赖？保留数据是否足以解释结果？ |
+| 运行与重跑 | 适用时按 [execution.md](execution.md) 核对真实日志、状态、资源和索引，保留旧结果及失败诊断 |
+| 代价与复杂度 | 成本说明是否区分实测/外推/未知？优化或恢复机制是否有实际收益及等价性证据？ |
+| 变更证据 | 测试与格式检查是否对应最终版本？有没有拿旧版本结果、工具成功或零退出码冒充全面正确？ |
 
-CLI structure is an engineering choice, so `SC002` is advisory even when scientific parameter names are detected. A user-selected CLI must still record effective scientific choices.
+运行时检查按 checks.md 判断；这里的作者核验不能变成新增 assert 或逐层扫描。
+必要输入约束、算法分支、错误记录与人类审批应分别理解。外部输入不是自动
+新增检查的理由；用户没有选择的审核点也不得出现。
 
-Heuristic warnings:
+## 只做相关验证
 
-| Code | Meaning |
-|---|---|
-| `SC002` | scientific parameter CLI or more than two operational arguments; prefer explicit configuration unless the project/user chose this interface |
-| `SC101` | scientific branch may be hidden behind config `if/else` |
-| `SC102` | factory/registry/manager-style abstraction appeared in pipeline scope |
-| `SC103` | generic `utils.py`/`helpers.py`-style module appeared in pipeline scope |
-| `SC104` | checkpoint or resume machinery appeared |
-| `SC105` | optimized/specialized implementation lacks a valid optimization report (missing, placeholder text, or `pipeline_speedup` inconsistent with the recorded end-to-end times) |
-| `SC106` | broad exception fallback may hide failure |
-| `SC107` | a scientific function may mutate an input parameter |
-| `SC108` | a likely scientific function lacks a semantic contract docstring (NumPy, Google, Sphinx, and Chinese conventions are accepted; a module overview does not waive scientific function contracts) |
-| `SC109` | a view appears to perform scientific computation (bootstrap, outlier removal, percentile/interval statistics, normalization, fitting); comments, docstrings, and labels are masked, executable identifiers are heuristic evidence, not proof of a calculation |
+选择能发现本次真实错误的科学 oracle、边界反例或等价性测试。
+结构改写关注顺序、阈值、空值与惰性消费中受到影响的部分。
+语言服务可用时检查真实 hover；只有 docstring 解析证据时如实说明。
+任务格式脚本负责注释间距和行宽，不能代替语义判断。
 
-`SC102`/`SC103` apply only inside pipeline scope (stage/view files); infrastructure code keeps its own conventions, per the scope gate.
+运行适用的 linter；命令、作用范围、错误代码和启发式局限见
+[lint.md](lint.md)，仅在操作工具或解释结果时加载该手册。
+不因某个启发式警告就推翻用户授权的设计，也不为普通核验默认重散列全部数据。
 
-A warning may be suppressed at file scope only with a concrete justification:
+报告具体位置、真实影响与证据，区分确定错误、启发式疑点和证据缺失。
+负责人局部修复后，仅复核受影响项；没有新问题时停止，不重启整轮。
 
-```python
-# scientific-code: allow SC104 -- 任务在可抢占节点运行四天，已核验确定性分片
-```
+## 交付
 
-Only warnings can be suppressed, including SC002; hard errors cannot be suppressed. Use a directive when the flagged construct is deliberate and the reason would help a reviewer. Do not override an authorized engineering choice just to silence a style warning.
-
-## Scientific Diff
-
-Report material changes to the method, input/output semantics, sample inclusion or mapping, randomness, artifact version, and runtime. Include before/after behavior and the relevant validation. Use concise prose for the facts that apply; do not require a form of repeated yes/no gates.
-
-## Definition of Done
-
-A task is complete only when scientific behavior and contracts are explicit, the stage boundary remains coherent, no unnecessary abstraction or hidden input/transformation was introduced, config and lineage remain readable, semantic changes are reported, optimization/resume complexity has evidence, and relevant deterministic checks pass.
+说明已完成的行为、相关验证和未覆盖范围。科学变化交代方法、数据语义、
+样本、随机、版本和成本中实际改变的内容。无需逐项 yes/no 表、检查账本、
+评分仪表盘或审阅者审批。完成的依据是目标实现且相关问题已解决，
+不是检查数量或评审轮数。

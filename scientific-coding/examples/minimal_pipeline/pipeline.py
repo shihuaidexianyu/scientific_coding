@@ -16,6 +16,11 @@ configs/pipeline.toml --> 选择上游、路径和暂停点
                                 v
                       results.svg + 来源记录
 
+CLI 启动 --> executions/attempts/<编号>/run.log + execution.json
+                         |
+                         v
+             executions/index/<编号>.json（所有尝试）
+
 三个阶段分别使用 configs/acquire_data.toml、
 configs/preprocess.toml 和 configs/analyze.toml。
 
@@ -38,19 +43,25 @@ pause_after 为空时连续运行，填写阶段名时在该阶段新产物生�
 results.svg、results.provenance.json 和 pipeline_config.toml。
 复用外部结果时省略相应上游生产目录；暂停时只保留已完成阶段。
 不覆盖历史运行。
+CLI 通过独立工作进程捕获完整输出、异常堆栈、阶段时间和资源；
+executions 中的可变记录位于已封存科学产物之外。直接函数调用供嵌入及测试，
+由所属执行入口负责一份运行记录，不为每个内部调用再创建尝试。
 """
 
 # 编排器管理执行顺序和路径，科学计算保留在各阶段内。
 import argparse
+import os
 from pathlib import Path
 import shutil
+import sys
 import uuid
-from artifact_io import PROJECT_ROOT, load_external_artifact, read_config
-from stages import acquire_data, preprocess, analyze
-from figures.figure_results import write_figure
+from execution import Progress, execute
+
+# 父进程只定位入口，业务模块留到日志已经建立后的工作进程中导入。
+PROJECT_ROOT = Path(__file__).resolve().parent
 
 
-def run(config_path: Path) -> Path:
+def run(config_path: Path, progress: Progress | None = None) -> Path:
     """按声明的上游来源和暂停点执行整个流水线。
 
     参数
@@ -68,6 +79,11 @@ def run(config_path: Path) -> Path:
 
         raw_artifact、processed_artifact 为已保存产物目录的路径字符串；
         空值表示不复用，两者不能同时非空，复用预处理结果会跳过采集与预处理。
+
+    progress : Progress 或 None
+        可选的执行边界观察器，保存阶段名、墙钟秒数和结果目录。
+        CLI 传入当前尝试的对象；嵌入或单元测试可省略，由外层入口负责记录。
+        该对象只观察进度，不决定阶段是否执行，也不校验科学数据。
 
     返回
     ----
@@ -90,6 +106,11 @@ def run(config_path: Path) -> Path:
     """
 
     # 创建结果目录前确定执行选择；这些选择不改写科学方法。
+    from artifact_io import load_external_artifact, read_config
+    from stages import acquire_data, preprocess, analyze
+    from figures.figure_results import write_figure
+
+    # 配置解析和业务导入在工作进程中进行，失败会进入本次完整日志。
     config = read_config(config_path)
     pause_after = config["pause_after"]
     if pause_after not in ("", "acquire_data", "preprocess", "analyze"):
@@ -110,9 +131,14 @@ def run(config_path: Path) -> Path:
     run_root = PROJECT_ROOT / config["run_root"] / ("run_" + uuid.uuid4().hex[:12])
     run_root.mkdir(parents=True, exist_ok=False)
     shutil.copyfile(config_path, run_root / "pipeline_config.toml")
+    if progress is not None:
+        progress.data["result_path"] = str(run_root)
+        progress.data["effective_pipeline_config"] = config
 
     # 复用已声明的预处理结果时跳过上游，在外部入口核验一次。
     if processed_input:
+        if progress is not None:
+            progress.enter("load_processed")
         processed_rows, processed_binding = load_external_artifact(
             PROJECT_ROOT / processed_input, "ProcessedTrials@1",
         )
@@ -120,35 +146,51 @@ def run(config_path: Path) -> Path:
 
         # 按已确定的流程复用原始结果或重新生成试次。
         if raw_input:
+            if progress is not None:
+                progress.enter("load_raw")
             raw_rows, raw_binding = load_external_artifact(PROJECT_ROOT / raw_input, "RawTrials@1")
         else:
+            if progress is not None:
+                progress.enter("acquire_data")
             raw_rows, raw_binding = acquire_data.run(
                 PROJECT_ROOT / config["acquire_config"], run_root / "raw_trials",
                 review_required=pause_after == "acquire_data",
             )
             if pause_after == "acquire_data":
+                if progress is not None:
+                    progress.data["status"] = "paused"
                 print(f"Requested review point: {run_root / 'raw_trials'}")
                 return run_root
 
         # 同次受控流程直接向下游传递已生成的数据及绑定。
+        if progress is not None:
+            progress.enter("preprocess")
         processed_rows, processed_binding = preprocess.run(
             raw_rows, raw_binding, PROJECT_ROOT / config["preprocess_config"],
             run_root / "processed_trials", review_required=pause_after == "preprocess",
         )
         if pause_after == "preprocess":
+            if progress is not None:
+                progress.data["status"] = "paused"
             print(f"Requested review point: {run_root / 'processed_trials'}")
             return run_root
 
     # 分析已建立保证的预处理输入，不重复入口检查。
+    if progress is not None:
+        progress.enter("analyze")
     result, result_binding = analyze.run(
         processed_rows, processed_binding, PROJECT_ROOT / config["analyze_config"],
         run_root / "analysis_result", review_required=pause_after == "analyze",
     )
     if pause_after == "analyze":
+        if progress is not None:
+            progress.data["status"] = "paused"
         print(f"Requested review point: {run_root / 'analysis_result'}")
         return run_root
 
     # 显示已经计算的数值，并将图绑定到实际分析来源。
+    if progress is not None:
+        progress.enter("figure")
     write_figure(result, result_binding, run_root / "results.svg")
     print(f"Completed pipeline: {run_root}")
     return run_root
@@ -159,4 +201,34 @@ if __name__ == "__main__":
     # 入口只接收一个配置路径，科学方法参数保存在 TOML 中。
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", nargs="?", default=str(PROJECT_ROOT / "configs/pipeline.toml"))
-    run(Path(parser.parse_args().config).resolve())
+    parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
+    arguments = parser.parse_args()
+    config_path = Path(arguments.config).resolve()
+    if not arguments.worker:
+
+        # 父入口先保存尝试，再启动业务代码；错误配置也有日志与实际退出码。
+        status, _ = execute(
+            [sys.executable, "-u", str(Path(__file__).resolve()), str(config_path), "--worker"],
+            PROJECT_ROOT / "executions", PROJECT_ROOT,
+            {"experiment_id": "minimal_pipeline", "config_path": str(config_path),
+             "source_paths": [str(PROJECT_ROOT / name) for name in (
+                 "pipeline.py", "execution.py", "artifact_io.py", "stages/acquire_data.py",
+                 "stages/preprocess.py", "stages/analyze.py", "figures/figure_results.py")]},
+        )
+        raise SystemExit(status)
+
+    # 父进程已保留启动源码；工作进程记录实际读取配置和既有阶段来源。
+    progress = Progress(Path(os.environ["SCIENTIFIC_EXECUTION_DIR"]))
+    progress.enter("setup")
+    try:
+        run(config_path, progress)
+    except BaseException as error:
+
+        # 保存失败阶段和已完成耗时，再传播异常，使父进程获得非零退出和完整堆栈。
+        progress.data["error"] = {"type": type(error).__name__, "message": str(error)}
+        progress.finish("failed")
+        raise
+    else:
+
+        # 用户选定暂停与正常完成分别记录；两者的命令退出均为成功。
+        progress.finish("paused" if progress.data["status"] == "paused" else "succeeded")

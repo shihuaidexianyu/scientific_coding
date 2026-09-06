@@ -1,98 +1,89 @@
 ---
 name: scientific-coding
-description: Create, modify, audit, and optimize readable scientific pipelines with annotated linear code, explicit configuration, self-describing data, and traceable results. Use for study preprocessing, analysis, inference, experiment scripts, and scientific views; do not impose this architecture on reusable libraries, dataset SDKs, or infrastructure.
+description: Create, modify, audit, and optimize readable scientific pipelines with Chinese explanations, explicit data and configuration, and traceable results. Use for study preprocessing, analysis, inference and scientific views; do not impose pipeline architecture on reusable libraries, SDKs or infrastructure.
 ---
 
 # Scientific Coding
 
-## Objective and scope
+## Purpose and scope
 
-Make a scientific pipeline an executable, locally understandable description of the method. Prioritize scientific correctness, human readability, explicit lineage, reproducibility, and research iteration time before runtime performance, memory economy, reuse, or compactness.
+Make the scientific method locally understandable in executable code. Prioritize scientific correctness and human readability, then reproducibility and research iteration time. Work within the user's existing project and decisions; do not migrate configuration or scaffold an artifact framework merely because this skill is active.
 
-Apply this skill to study-specific pipelines. Preserve reusable numerical libraries, parsers, dataset SDKs, simulation engines, and infrastructure as reusable software. In existing projects, make the narrowest coherent change: using this skill does not authorize migrating the configuration system or scaffolding an artifact framework. User instructions determine the task and may override this skill's engineering defaults.
+Never trade code readability or explanatory completeness for fewer output tokens, lines or characters. Spend the tokens needed for explicit named intermediates, separate logical steps and Chinese documentation. Do not compress work into syntactic sugar, chained calls, lambdas, assignment expressions or short-circuit expressions merely to shorten output. A construct is acceptable only when the operation remains easier to understand and the readability rules below still hold. Reducing repeated skill instructions does not relax the generated-code requirements.
 
-## Default workflow
+Complete the requested outcome. Stage boundaries do not require human approval. Pause only for an unresolved material scientific decision or a review point explicitly selected by the user. Preserve earlier results and manual edits.
 
-```text
-declared input data + explicit configuration + scientific code
-                              |
-                              v
-                    one readable stage
-                              |
-                              v
-                 complete, described result -> next stage
-```
+## Write logic first; justify checks afterwards
 
-Run through the requested outcome when inputs and scientific choices are established. A stage or intermediate file does not create a human approval gate. Pause only for an unresolved material scientific choice or at a review point the user explicitly requested. Reuse decisions already made in the conversation. Never represent automated execution or verification as a human review.
+The first draft contains only the original scientific/business logic: read, transform, compute and produce output. Do not preinstall assertions, defensive validation, preflights, fallback/repair branches or approval gates, including dormant validation scaffolding. Method-defining selection and branching remain part of the algorithm; normal reader/library exceptions propagate.
 
-Preserve prior results when rerunning: write a new run, with its actual config and inputs. Versioning and provenance do not require approval records. Use the bundled artifact tool when hash-bound artifacts are useful; adapt an existing project's equivalent mechanism instead of adding a second one.
+After the complete logical path exists, consider a runtime check only if a concrete, credible failure in this project makes it necessary. Establish the trigger and its likelihood evidence, the consequence, what upstream construction/contracts already exclude, why ordinary API errors or authoring-time tests are insufficient, and whether effective detection justifies the reading/runtime/maintenance cost. Unknown probability is not permission to add a check; do not invent percentages. Hypothetical rare memory corruption is not a reason for defensive pipeline code.
 
-## Readability requirements
+Reuse guarantees while valid. An external file, a helper call or an undocumented possibility does not automatically justify validation. Retain only justified checks at their owning boundary; do not generate check registries, proof logs or approval forms. For existing code, assess actual checks before removing them; the draft rule does not authorize breaking established behavior blindly. The decision policy and examples live in [checks.md](references/checks.md).
 
-- **All explanatory comments and documentation are in Chinese.** This includes file headers, hover-visible function documentation, parameter/result descriptions, inline semantic-block comments, TOML comments, and data guides. Keep API identifiers, field names, and required tool directives intact; explain their meaning in Chinese.
-- Begin every generated/edited source file with a Chinese file overview and a **text flow diagram** of its real inputs, transformations, outputs, and associated TOML configuration. In Python the module docstring's opening `"""` occupies its own line; write the purpose on the next line, then the diagram before detailed explanations. Preserve required first-line directives. Describe actual files, fields/axes, path bases and config keys; name in-memory input/output or absent I/O/config where appropriate. The diagram complements these details and must not invent processing steps.
-- Give every defined function hover-visible Chinese documentation in the **fixed layout** shown in [stage_header.md](templates/stage_header.md): a short purpose, then `参数`, `返回`, `处理过程`, `副作用`, in that order. Python uses a real first-statement docstring. Put each parameter/return item's **name and type on its own line**, its explanation indented below, with a blank line between items. Expand dictionary fields as separate entries, define axes/units locally, and number processing steps on separate lines. Wrap long prose in the source. Do not use dense `参数 x: ...` paragraphs or references to another function in place of this call's structure. Check the actual hover output when an editor/language service is available; distinguish that evidence from merely parsing a docstring.
-- Keep one coherent scientific purpose in one stage file by default. Its main computation follows execution order with meaningful intermediate names. Internal functions should name real scientific operations or clear I/O boundaries, and keep important calculations easy to find.
-- Explain every meaningful operation next to its code. A comment may cover one statement or several consecutive statements accomplishing one operation. State purpose and relevant changes in values, shape, axes, units, or sample membership; do not merely translate syntax.
-- Put one blank line **before each comment block**, then the explained code immediately after it. Consecutive lines of one comment block stay together. The first `#` block inside a function, including one immediately after its docstring, also needs this blank line. No leading blank is necessary at the start of a file or code cell; shebangs and encoding/tool directives retain required positions. Prefer preceding comments to trailing explanations. Function/file docstrings use blank lines internally to separate their readable sections.
-- **Enforce comment spacing with code.** Write and run a small task-specific formatting script for all source/config languages you create or edit, not just Python or TOML. Use the relevant language's comment syntax/tokenizer so strings and required directives are preserved. Obtain a clean check on the final files; fix any reported spacing omissions and recheck. A clean check after the last edit needs no redundant no-op repair run. This is a temporary authoring tool, not a runtime validation step or a new project framework. See [readability.md](references/readability.md).
-- Every generated or edited TOML file has descriptions for its sections and each key, including units, boundary conventions, and scientific effects where relevant. Use the same blank-before-comment layout, including array entries that need distinct explanations.
-- Begin the pipeline with a data inventory and reading guide. Describe each stage result in the same way: location/format, fields or axes, types, units, sample meaning/identity, missing values, alignment, and how to load and use it. Explain important in-memory intermediate changes inline without requiring extra files.
-- Keep comments, configs, contracts, and reading guides consistent with actual code. Check claimed effects and guarantees against the implementation; do not add plausible-sounding scientific or provenance claims. Mark unknown properties instead of inventing them. Substantial examples and data-description fields are in [references/readability.md](references/readability.md).
+Authoring review/tests and recording actual execution are distinct from runtime validation. The first draft is a writing phase, not permission to publish unverified results. Add the required execution recording at the outer boundary before the delivered program runs; keep it out of numerical logic.
 
-## Checks and established guarantees
+## Readable code and explanations
 
-Internal code relies on upstream guarantees that remain valid. Add a runtime check only for a concrete error that has not already been ruled out. A guarantee may come from a completed boundary check, an applicable API contract, or construction by the current code. A claim in an unverified external file is not a guarantee.
+- All explanatory comments, file/function documentation, TOML descriptions and data guides are Chinese; keep API identifiers intact.
+- Each edited/generated source file has an accurate purpose, actual inputs/outputs, associated configuration and a character flow diagram. Python module opening quotes occupy their own line.
+- Every function has hover-visible documentation in this order: purpose, 参数, 返回, 处理过程, 副作用. Names/types are separate from indented explanations; separate parameters/returns with blank lines and describe fields, axes and units locally.
+- Explain meaningful operations next to their code, one comment per semantic block rather than per punctuation line. Put a blank before each comment block, including after docstrings, and keep its code immediately after it. Explain associated TOML sections and keys.
+- Source/config lines, including comments/docstrings, are at most 80 characters. Use one comprehension layer and one `for` with at most one simple filter; expand additional nesting. Keep explicit control flow shallow.
+- Name intermediate filtering, mapping, aggregation and constructed data before passing it as an argument. Use explicit branches for multi-step fallback and mixed conditional selection; preserve evaluation order, false-valued data and iterator laziness.
+- One loop has one purpose. Separate collecting, determining reasons and constructing output into named steps without trivial wrappers or generic frameworks.
+- Inventory initial data and describe each stage result: location/format, fields/axes, types/units, identity/alignment, actual reading method and changes from inputs. Explain important in-memory intermediates locally.
 
-Before retaining a check, identify the error it detects, where that error was already excluded, and what intervening operation could reintroduce it. Remove the check if there is no such operation. Function calls, loops, and helper layers do not create new trust boundaries. Do not recheck the same keys, types, fields, IDs, shapes, file existence, hashes, or review decisions at each layer.
+Use [readability.md](references/readability.md) for exact rules and [stage_header.md](templates/stage_header.md) for the single maintained function/header layout. Correct explanations to match intended behavior; do not change science just to make an inaccurate comment true.
 
-Validate an external input at its owning entry point; after a transformation, check only a newly at-risk scientific invariant. Prefer normal API errors for ordinary failures unless an early check prevents costly/partial work or materially improves diagnosis. Explain a guarantee once where established. Do not add validation managers, verified flags, proof logs, or wrappers merely to enforce this rule.
+## Scientific and execution boundaries
 
-## Scientific structure
+- Keep coherent scientific operations visible and ordered. Formal stages exchange described data, not imports of other stages' implementation. Create persisted boundaries only when retention, reuse or restart warrants them.
+- Keep materially different methods visible in sibling implementations. Preserve IDs and record actual exclusions, splits, joins and aggregations. Choose statistical units and resampling from the study design.
+- Use self-contained annotated TOML for new scientific configuration; preserve an existing format. Runtime options must not silently change the method.
+- Views normally present retained calculations. Respect a requested combined-file layout while making analysis and rendering distinct.
+- Every runnable scientific entry point retains actual provenance, full stdout/stderr/tracebacks, UTC lifecycle, real status/exit code, stage times and available CPU/RAM/VRAM with measurement scope. One outer attempt record suffices; batch indexes link all attempts, including failures and retries. Preserve old results and failed diagnostics; reuse existing infrastructure.
+- After scientific code or computational configuration changes, give a Chinese workload/time/memory estimate with hardware/workers, bottlenecks and evidence. Distinguish measurements, extrapolation and unknowns. Do not invent runtime numbers or automatically start optimization.
 
-- Connect stages by described data contracts, not imports of another stage's scientific implementation. A small orchestrator may call stages but does not perform their science.
-- Keep materially different methods visible, usually in sibling files. Share stable named scientific operations where doing so improves understanding. A user-requested alternative layout must still expose the scientific differences.
-- Define multi-input roles and join rules explicitly. Preserve IDs; record exclusions when samples are removed and mappings when samples are split, joined, or aggregated.
-- Use annotated, self-contained TOML for new scientific configs. Preserve an existing project's configuration format; capture the effective config and meaningful overrides. Runtime paths, hardware selection, workers, and credentials are execution inputs: they must not silently alter the scientific method, and credentials must not be copied into provenance.
-- Keep formal views presentation-only by default. Scientific transformations must be explicit, documented, and retained as results; when the user requests a combined file, visibly separate analysis from rendering and document the deliberate boundary.
-- Profile before adding performance complexity; consider repeated-run cost as well as single-run latency. Add resumability only when restart loss justifies it. Preserve a readable reference and scientific equivalence where applicable.
+## Authoring workflow
 
-## Route and work
+1. **Implement:** complete the original logical path, without defensive checks. Keep essential scientific intent beside the computation.
+2. **Simplify and decide:** remove needless indirection, simplify expressions/loops, and apply the check-necessity policy to actual candidates. No default quota of checks.
+3. **Explain:** complete accurate Chinese code, interface, data and associated configuration descriptions against the current source.
+4. **Format:** write and run a task-specific, language-aware script for comment spacing and the 80-character limit. Verify string/parse meaning is preserved and obtain a clean final check.
+5. **Verify:** review final code and explanations together; run checks relevant to the change. For complete plans or substantial multi-function work, use a permitted independent read-only agent when available. Fix concrete findings through only the affected passes, then verify the changed result.
 
-Read only the references needed for the task:
+These are authoring responsibilities, not five approvals or runtime stages. Small changes need only applicable work. Do not repeat successful checks without a new change, failure or unresolved concern. Details and intervention handling: [workflow.md](references/workflow.md).
 
-| Task | Reference |
+When the user intervenes, answer promptly and continue unless they pause or replace the task. Reread affected files before editing, preserve manual changes, and invalidate only evidence dependent on changed code/config. Ask only about material unresolved conflicts; no new state machine or mandatory working log.
+
+## Load only what the task needs
+
+Do not open every reference or copy all templates/examples. The entrypoint supplies shared constraints; load a reference only when making the decision it covers. Previously read, unchanged instructions need not be reread every pass.
+
+| Current decision | Reference |
 |---|---|
-| Create, modify, or branch a stage | [stage.md](references/stage.md), [readability.md](references/readability.md) |
-| Create/change inputs, outputs, lineage, contracts, or review points | [artifact.md](references/artifact.md) |
-| Compute statistics, comparisons, intervals, splits, or resampling | [statistical_validity.md](references/statistical_validity.md) |
-| Create or change a scientific view | [view.md](references/view.md), [readability.md](references/readability.md) |
-| Optimize | [optimization.md](references/optimization.md) |
-| Add resume/checkpoint behavior | [resumability.md](references/resumability.md) |
-| Audit or perform final review | [audit.md](references/audit.md) |
+| Add/remove/retain runtime checks | [checks.md](references/checks.md) |
+| Write explanations, format, simplify expressions | [readability.md](references/readability.md) |
+| Create/change a stage or scientific branch | [stage.md](references/stage.md) |
+| Define data boundaries, lineage or retained artifacts | [artifact.md](references/artifact.md) |
+| Design inference, splits or resampling | [statistical_validity.md](references/statistical_validity.md) |
+| Build scientific views | [view.md](references/view.md) |
+| Add/change runnable entry points and records | [execution.md](references/execution.md) |
+| Give an ordinary cost estimate | [estimation.md](references/estimation.md) |
+| Actually optimize performance | [optimization.md](references/optimization.md) |
+| Decide/implement resumability | [resumability.md](references/resumability.md) |
+| Perform a substantive final or requested audit | [audit.md](references/audit.md) |
+| Interpret linter findings or configure its scope | [lint.md](references/lint.md) |
 
-Inspect code, data descriptions, configs, and local instructions first. Establish the current scientific behavior and make the requested change. For any source/config generation or editing task, carry out this authoring sequence:
+The integrated [example](examples/minimal_pipeline/README.md) demonstrates optional artifact/review/resume facilities together; it is not a default scaffold. Use only needed parts.
 
-1. **Implement:** follow the plan through the requested outcome, keeping essential scientific intent and data assumptions beside the code.
-2. **Simplify:** review scientific correctness and readability; remove redundant checks, dead code, needless indirection, and repeated gates before polishing explanations. Preserve user edits and established behavior unless a change is authorized.
-3. **Explain:** inspect the affected source and its directly associated scientific configuration/data guides, including TOML whose parameter values did not change. Complete accurate Chinese file headers, hover-visible function documentation, semantic-block comments, TOML explanations, and data guides against the current implementation. Do not limit this pass to the source files edited during simplification; leave unrelated files and user-protected content alone.
-4. **Format:** write and execute the task-specific comment formatter across every involved language, obtain a clean check on the final files, and verify parsing/meaning is preserved. Run repairs only when needed; a final clean check is sufficient after a later edit. Manual blank-line edits or a statement that formatting looks correct do not satisfy this operation.
-5. **Verify:** review the final code and explanations together and run relevant scientific tests and the linter below. For a complete plan or a documentation/simplification task spanning multiple functions, use an available, permitted independent agent for this final read-only review; it reads current source/config/data before the author's completion claims and reports concrete discrepancies for local repair. Without that capability, reread the final files yourself and state the scope honestly. Stop when the requested outcome and relevant checks are satisfied; more tokens are justified by identified uncertainty, not by repeating successful checks.
+## Verification and delivery
 
-These are authoring passes, not runtime pipeline stages or approval gates. Keep one owner for edits and do not add a multi-agent controller. Repair concrete findings through only the affected passes, then verify the changed result. Small edits need only the applicable work. See [workflow.md](references/workflow.md) for completion conditions and local repair examples.
+Run the relevant changed-code linter where applicable:
 
-**Handle intervention without losing the task.** Answer mid-review questions promptly, incorporate new instructions, and continue the main task unless the user pauses or replaces it. Before editing, reread the current affected files and compare them with the version last inspected; preserve manual changes and reconcile overlapping edits instead of overwriting them. A question alone does not invalidate prior checks. A code/config change invalidates only conclusions that depend on it; update affected explanations and rerun relevant validation. Never present checks on an older version as evidence for newer code. Ask only when a material conflict cannot be resolved from the conversation, and continue independent work meanwhile. Keep a brief working note when needed, not a new state machine or mandatory progress log.
+    python <skill-dir>/scripts/scientific_code_lint.py <project-root> --changed-only
 
-The bundled linter does **not** enforce comment spacing and is **not** a substitute for the agent-written formatter. Do not insert the formatter into normal pipeline execution.
+For a whole-project audit omit `--changed-only`; for committed changes use `--base-ref`. Fix errors and assess heuristic warnings from actual evidence. This linter does not enforce the new expression/80-character/comment-spacing rules or prove scientific/documentation truth; use the task script and semantic review. Keep authoring tools outside the runtime pipeline.
 
-```bash
-python <skill-dir>/scripts/scientific_code_lint.py <project-root> --changed-only
-```
-
-For a full audit, omit `--changed-only`; for committed changes use `--base-ref`. Fix errors, and resolve heuristic warnings or justify a deliberate exception. Passing lint does not prove that comments are true or the science is valid. Templates and [the runnable example](examples/minimal_pipeline/README.md) demonstrate the intended result.
-
-## Completion report
-
-Lead with the implemented outcome and validation, including any untested limits. When science may change, report before/after behavior, input/output semantics, sample inclusion or mapping, randomness, contract/run version, and material runtime effects. Explain assumptions and unresolved scientific questions. Do not bury the answer in a fixed boilerplate form or add a review gate at delivery.
-
-For code/config edits, briefly state the languages covered by the executed formatter and its final check result; report actual execution, not intent.
+Lead delivery with the outcome, actual validation and limits. Report material method/data/population/randomness changes when applicable, the formatter's coverage and final result, actual log/record/index locations for runnable work, and the Chinese cost estimate. A zero exit code does not mean statistical significance. Explain a non-obvious retained check briefly when useful; do not attach a mandatory check ledger or approval form.

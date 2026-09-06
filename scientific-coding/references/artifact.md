@@ -6,9 +6,9 @@ Use when creating/changing data boundaries, provenance, run handling, or a user-
 
 A stage consumes one or more explicitly named datasets and produces described results. Downstream code uses the data contract, not the upstream scientific implementation. Keep stage code linear even when the overall dependency graph branches or joins.
 
-A result worth retaining has data, an annotated contract or equivalent data description, and actual input/config/code provenance. Use existing project conventions when adequate. In a new hash-bound workflow, the bundled tool uses `artifact_contract.toml`, `run.json`, and `manifest.json`; runtime profiles, exclusion ledgers, mappings, and review previews are included when useful. Approval files are optional.
+A result worth retaining has data, an annotated contract or equivalent data description, and actual input/config/code provenance. Use existing project conventions when adequate. In a new hash-bound workflow, the bundled tool uses `artifact_contract.toml`, `run.json`, and `manifest.json`. Ordinary execution logs/timing/resource records are required; detailed profiler traces and review previews are added when useful. Exclusion ledgers and mappings are required when the corresponding sample changes occur. Approval files are optional.
 
-The contract describes representation, fields/axes, types, units, missing values, coordinates/time, preprocessing, sample identity, ordering, and population where applicable. Include file formats and concrete loading instructions as described in [readability.md](readability.md). The generic verifier checks declared structure and basic CSV/JSON schemas; domain-specific scientific assumptions remain the producer/loader's responsibility. It cannot establish scientific validity from metadata.
+The contract describes representation, fields/axes, types, units, missing values, coordinates/time, preprocessing, sample identity, ordering, and population where applicable. Include formats and loading instructions from [readability.md](readability.md). A data description is not a request to generate a validator for every field. The optional generic verifier handles supported metadata and CSV/JSON schemas; author review establishes domain assumptions and applies checks.md before adding runtime guards.
 
 Version the contract when interpretation changes. A new run/config always gets a new output location. A comments-only edit to a tracked contract may preserve the semantic version but changes an identity file, so a newly produced artifact has a new artifact hash. Source comments recorded only through a code hash in run.json change the manifest hash; they need not change the artifact hash when identity files are unchanged. Do not rewrite historical results to add explanations.
 
@@ -20,11 +20,13 @@ Preserve sample IDs when identity is unchanged. Emit per-ID reasons for exclusio
 
 ## Necessary validation and provenance
 
-Establish each input guarantee at its real trust boundary and reuse it while valid. An unchanged artifact just produced within the same controlled run need not be rehashed at every function call. A separately loaded or potentially modified external artifact must be verified once on entry. Keep the binding to the exact artifact/config/version used; a previous approval alone does not verify newly read bytes.
+Apply [checks.md](checks.md) after the full logical path is written; external origin alone does not justify runtime validation. Keep the actual input/config/version binding for provenance. When the chosen reuse protocol requires exact hash-bound identity, verify that identity once at its owning entry and reuse it while valid. Do not rescan unchanged in-process data. A previous approval is a recorded decision, not evidence about newly read bytes.
 
 Record actual input roles and hashes/versions, effective config (including overrides), code revision or source hash including dirty changes, environment/library versions, and randomness needed to reproduce the computation. Do not substitute placeholder commits or claimed measurements. Distinguish execution inputs (worker count, scheduler, hardware, temporary paths) from scientific choices; never record credentials. Materialize experiment-defining splits or permutations when necessary to preserve their identities across consumers.
 
 ## Production and reruns
+
+Every ordinary and failed execution also retains the logs, timing/resource evidence, outcome/exit code and batch-index links required by [execution.md](execution.md). Store these mutable attempt records outside finalized scientific artifacts, reference existing provenance, and keep failure diagnostics even when discarding unpublished payloads. Logging is execution bookkeeping, not an approval or validation gate.
 
 Write a complete result to a staging directory on the same filesystem, then publish it under a fresh final name. Refuse to overwrite an existing run. Clean up only that run's own staging directory on failure. The public directory must contain the contract, payload, and provenance before it appears complete.
 
