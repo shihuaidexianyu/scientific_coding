@@ -1,5 +1,0 @@
-# Scientific filtering parameters.
-[analysis]
-
-# Keep amplitudes equal to or above this floor, in microvolts.
-floor_uv = 0.5

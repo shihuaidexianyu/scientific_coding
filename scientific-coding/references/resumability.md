@@ -24,7 +24,7 @@ For a 20-minute stable stage, explain why checkpoint complexity is unlikely to h
 2. Use the existing stage artifact boundary if it is sufficient.
 3. If not, divide work into independently reproducible, idempotent units.
 4. Write each unit atomically with its identity, config/input hashes, seed, and completion metadata.
-5. On resume, validate completed units and run only missing or invalid ones.
+5. On resume, have the orchestration/resume entry verify each reused unit once under the chosen reuse protocol and run only missing or invalid ones. Scientific unit functions do not perform resume validation; downstream consumers reuse still-valid bindings. Follow [checks.md](checks.md) for ownership and necessity.
 6. Keep discovery, scheduling, retry, and resume logic outside the scientific function.
 7. Aggregate deterministically and record shard ordering/reduction behavior.
 8. Verify uninterrupted and interrupted-plus-resumed equivalence.

@@ -1,0 +1,17 @@
+# 描述性振幅实验的统一参数，路径相对本 TOML 所在目录。
+[input]
+
+# UTF-8 CSV，两列为 trial_id 和 amplitude_uv。
+trials_path = "../../data/trials.csv"
+
+# 本实验的科学筛选参数。
+[preprocess]
+
+# 保留振幅下限，单位微伏；等于下限时保留。
+floor_uv = 0.5
+
+# 结果位置，每次运行按独立尝试编号建立目录。
+[output]
+
+# 结果父目录，相对本 TOML，不随启动目录变化。
+run_root = "../../runs"

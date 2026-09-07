@@ -119,16 +119,27 @@ def run(config_path: Path, progress: Progress | None = None) -> Path:
     processed_input = config.get("processed_artifact", "")
 
     if raw_input and processed_input:
-        raise ValueError("Declare either raw_artifact or processed_artifact, not both")
+        raise ValueError(
+            "Declare either raw_artifact or processed_artifact, not both"
+        )
 
     # 暂停只能针对本次新生成的产物，跳过的生产阶段没有新评审对象。
-    if (raw_input or processed_input) and pause_after == "acquire_data":
-        raise ValueError("acquire_data is skipped for an external input; choose an executed stage")
+    uses_external_input = raw_input or processed_input
+    if uses_external_input and pause_after == "acquire_data":
+        raise ValueError(
+            "acquire_data is skipped for an external input; "
+            "choose an executed stage"
+        )
     if processed_input and pause_after == "preprocess":
-        raise ValueError("preprocess is skipped for processed_artifact; choose an executed stage")
+        raise ValueError(
+            "preprocess is skipped for processed_artifact; "
+            "choose an executed stage"
+        )
 
     # 分配新运行目录；编号只影响保存位置，不参与科学计算。
-    run_root = PROJECT_ROOT / config["run_root"] / ("run_" + uuid.uuid4().hex[:12])
+    run_root = (
+        PROJECT_ROOT / config["run_root"] / ("run_" + uuid.uuid4().hex[:12])
+    )
     run_root.mkdir(parents=True, exist_ok=False)
     shutil.copyfile(config_path, run_root / "pipeline_config.toml")
     if progress is not None:
@@ -140,7 +151,8 @@ def run(config_path: Path, progress: Progress | None = None) -> Path:
         if progress is not None:
             progress.enter("load_processed")
         processed_rows, processed_binding = load_external_artifact(
-            PROJECT_ROOT / processed_input, "ProcessedTrials@1",
+            PROJECT_ROOT / processed_input,
+            "ProcessedTrials@1",
         )
     else:
 
@@ -148,12 +160,15 @@ def run(config_path: Path, progress: Progress | None = None) -> Path:
         if raw_input:
             if progress is not None:
                 progress.enter("load_raw")
-            raw_rows, raw_binding = load_external_artifact(PROJECT_ROOT / raw_input, "RawTrials@1")
+            raw_rows, raw_binding = load_external_artifact(
+                PROJECT_ROOT / raw_input, "RawTrials@1"
+            )
         else:
             if progress is not None:
                 progress.enter("acquire_data")
             raw_rows, raw_binding = acquire_data.run(
-                PROJECT_ROOT / config["acquire_config"], run_root / "raw_trials",
+                PROJECT_ROOT / config["acquire_config"],
+                run_root / "raw_trials",
                 review_required=pause_after == "acquire_data",
             )
             if pause_after == "acquire_data":
@@ -166,8 +181,11 @@ def run(config_path: Path, progress: Progress | None = None) -> Path:
         if progress is not None:
             progress.enter("preprocess")
         processed_rows, processed_binding = preprocess.run(
-            raw_rows, raw_binding, PROJECT_ROOT / config["preprocess_config"],
-            run_root / "processed_trials", review_required=pause_after == "preprocess",
+            raw_rows,
+            raw_binding,
+            PROJECT_ROOT / config["preprocess_config"],
+            run_root / "processed_trials",
+            review_required=pause_after == "preprocess",
         )
         if pause_after == "preprocess":
             if progress is not None:
@@ -179,8 +197,11 @@ def run(config_path: Path, progress: Progress | None = None) -> Path:
     if progress is not None:
         progress.enter("analyze")
     result, result_binding = analyze.run(
-        processed_rows, processed_binding, PROJECT_ROOT / config["analyze_config"],
-        run_root / "analysis_result", review_required=pause_after == "analyze",
+        processed_rows,
+        processed_binding,
+        PROJECT_ROOT / config["analyze_config"],
+        run_root / "analysis_result",
+        review_required=pause_after == "analyze",
     )
     if pause_after == "analyze":
         if progress is not None:
@@ -200,20 +221,43 @@ if __name__ == "__main__":
 
     # 入口只接收一个配置路径，科学方法参数保存在 TOML 中。
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("config", nargs="?", default=str(PROJECT_ROOT / "configs/pipeline.toml"))
+    parser.add_argument(
+        "config", nargs="?", default=str(PROJECT_ROOT / "configs/pipeline.toml")
+    )
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     arguments = parser.parse_args()
     config_path = Path(arguments.config).resolve()
     if not arguments.worker:
 
         # 父入口先保存尝试，再启动业务代码；错误配置也有日志与实际退出码。
+        worker_command = [
+            sys.executable,
+            "-u",
+            str(Path(__file__).resolve()),
+            str(config_path),
+            "--worker",
+        ]
+        source_names = (
+            "pipeline.py",
+            "execution.py",
+            "artifact_io.py",
+            "stages/acquire_data.py",
+            "stages/preprocess.py",
+            "stages/analyze.py",
+            "figures/figure_results.py",
+        )
+        source_paths = [str(PROJECT_ROOT / name) for name in source_names]
+        provenance = {
+            "experiment_id": "minimal_pipeline",
+            "config_path": str(config_path),
+            "source_paths": source_paths,
+        }
+        execution_directory = PROJECT_ROOT / "executions"
         status, _ = execute(
-            [sys.executable, "-u", str(Path(__file__).resolve()), str(config_path), "--worker"],
-            PROJECT_ROOT / "executions", PROJECT_ROOT,
-            {"experiment_id": "minimal_pipeline", "config_path": str(config_path),
-             "source_paths": [str(PROJECT_ROOT / name) for name in (
-                 "pipeline.py", "execution.py", "artifact_io.py", "stages/acquire_data.py",
-                 "stages/preprocess.py", "stages/analyze.py", "figures/figure_results.py")]},
+            worker_command,
+            execution_directory,
+            PROJECT_ROOT,
+            provenance,
         )
         raise SystemExit(status)
 
@@ -225,10 +269,17 @@ if __name__ == "__main__":
     except BaseException as error:
 
         # 保存失败阶段和已完成耗时，再传播异常，使父进程获得非零退出和完整堆栈。
-        progress.data["error"] = {"type": type(error).__name__, "message": str(error)}
+        progress.data["error"] = {
+            "type": type(error).__name__,
+            "message": str(error),
+        }
         progress.finish("failed")
         raise
     else:
 
         # 用户选定暂停与正常完成分别记录；两者的命令退出均为成功。
-        progress.finish("paused" if progress.data["status"] == "paused" else "succeeded")
+        if progress.data["status"] == "paused":
+            final_status = "paused"
+        else:
+            final_status = "succeeded"
+        progress.finish(final_status)

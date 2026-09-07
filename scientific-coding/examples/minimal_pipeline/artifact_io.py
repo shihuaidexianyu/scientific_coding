@@ -48,16 +48,26 @@ import tomllib
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 # 仅在模块加载时定位一次已安装 skill 的共享产物工具。
-_candidates = [Path(os.environ["SCIENTIFIC_CODING_SCRIPTS"])] if "SCIENTIFIC_CODING_SCRIPTS" in os.environ else []
+_candidates = []
+if "SCIENTIFIC_CODING_SCRIPTS" in os.environ:
+    configured_tools = Path(os.environ["SCIENTIFIC_CODING_SCRIPTS"])
+    _candidates.append(configured_tools)
 for parent in (PROJECT_ROOT, *PROJECT_ROOT.parents):
-    _candidates.extend([
+    parent_candidates = [
         parent / "scripts",
         parent / ".agents/skills/scientific-coding/scripts",
         parent / ".claude/skills/scientific-coding/scripts",
-    ])
-TOOL_DIR = next((p for p in _candidates if (p / "scientific_artifact.py").is_file()), None)
+    ]
+    _candidates.extend(parent_candidates)
+TOOL_DIR = None
+for candidate in _candidates:
+    if (candidate / "scientific_artifact.py").is_file():
+        TOOL_DIR = candidate
+        break
 if TOOL_DIR is None:
-    raise RuntimeError("Set SCIENTIFIC_CODING_SCRIPTS to this skill's scripts directory")
+    raise RuntimeError(
+        "Set SCIENTIFIC_CODING_SCRIPTS to this skill's scripts directory"
+    )
 sys.path.insert(0, str(TOOL_DIR))
 import scientific_artifact as artifact_tool
 import scientific_code_lint as integrity
@@ -94,6 +104,7 @@ def read_config(path: Path) -> dict:
     attempt = os.environ.get("SCIENTIFIC_EXECUTION_DIR")
     if attempt:
         from execution import save_snapshot
+
         save_snapshot(Path(attempt), path, content, "config_at_read")
 
     # TOML 解析器负责语法与类型解析，辅助函数不重复检查。
@@ -161,7 +172,9 @@ def json_bytes(value: dict) -> bytes:
     """
 
     # 由序列化器拒绝非有限数，避免生成非标准 JSON。
-    return (json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode("utf-8")
+    return (
+        json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+    ).encode("utf-8")
 
 
 def binding_for(directory: Path, manifest: dict) -> dict:
@@ -200,17 +213,27 @@ def binding_for(directory: Path, manifest: dict) -> dict:
 
     # 绑定数据内容和来源；路径尽可能相对项目根目录记录。
     path = os.path.relpath(directory, PROJECT_ROOT).replace("\\", "/")
+    contract = manifest["contract"]
+    contract_identity = f"{contract['name']}@{contract['version']}"
     return {
         "path": path,
-        "contract": f"{manifest['contract']['name']}@{manifest['contract']['version']}",
+        "contract": contract_identity,
         "artifact_hash": manifest["artifact_hash"],
         "manifest_hash": manifest["manifest_hash"],
     }
 
 
-def publish_payload(payloads: dict[str, bytes], contract_path: Path,
-                    config_path: Path, script_path: Path, output_dir: Path,
-                    inputs: list[dict], *, config_values: dict, review_required: bool = False) -> dict:
+def publish_payload(
+    payloads: dict[str, bytes],
+    contract_path: Path,
+    config_path: Path,
+    script_path: Path,
+    output_dir: Path,
+    inputs: list[dict],
+    *,
+    config_values: dict,
+    review_required: bool = False,
+) -> dict:
     """将完整数据和来源封存后发布到新目录。
 
     参数
@@ -288,15 +311,26 @@ def publish_payload(payloads: dict[str, bytes], contract_path: Path,
         # 记录实际源码、输入绑定、有效配置与执行环境。
         record = {
             "schema_version": 1,
-            "run_id": os.path.relpath(output_dir, PROJECT_ROOT).replace("\\", "/"),
+            "run_id": os.path.relpath(output_dir, PROJECT_ROOT).replace(
+                "\\", "/"
+            ),
             "stage": script_path.stem,
-            "config": {"path": "config.toml", "sha256": integrity.sha256_file(config_path)},
-            "code": {"path": str(script_path.relative_to(PROJECT_ROOT)), "sha256": integrity.sha256_file(script_path)},
+            "config": {
+                "path": "config.toml",
+                "sha256": integrity.sha256_file(config_path),
+            },
+            "code": {
+                "path": str(script_path.relative_to(PROJECT_ROOT)),
+                "sha256": integrity.sha256_file(script_path),
+            },
             "execution_code_sha256": integrity.sha256_file(Path(__file__)),
             "input_artifacts": inputs,
             "python_version": platform.python_version(),
             "library_versions": {"standard_library": platform.python_version()},
-            "hardware": {"machine": platform.machine(), "processor": platform.processor()},
+            "hardware": {
+                "machine": platform.machine(),
+                "processor": platform.processor(),
+            },
             "effective_config": config_values,
             "randomness": {"seed": config_values.get("seed")},
             "recorded_at_unix_s": time.time(),
@@ -310,7 +344,9 @@ def publish_payload(payloads: dict[str, bytes], contract_path: Path,
         with contextlib.redirect_stdout(io.StringIO()):
             status = artifact_tool.run(args)
         if status:
-            raise ValueError("Artifact finalization failed; no result was published")
+            raise ValueError(
+                "Artifact finalization failed; no result was published"
+            )
         manifest = integrity.load_json(staging / "manifest.json")
 
         # 直接使用内存中的封存清单；重命名后不再次计算相同哈希。
@@ -323,7 +359,9 @@ def publish_payload(payloads: dict[str, bytes], contract_path: Path,
             shutil.rmtree(staging)
 
 
-def load_external_artifact(directory: Path, expected_contract: str) -> tuple[object, dict]:
+def load_external_artifact(
+    directory: Path, expected_contract: str
+) -> tuple[object, dict]:
     """一次验证外部保存结果，并按契约读入内存。
 
     参数
@@ -379,10 +417,14 @@ def load_external_artifact(directory: Path, expected_contract: str) -> tuple[obj
     collector = integrity.IssueCollector(directory, {})
     manifest = integrity.verify_artifact_dir(directory, collector, full=True)
     if collector.issues:
-        raise ValueError("; ".join(issue.message for issue in collector.issues))
+        issue_messages = [issue.message for issue in collector.issues]
+        error_message = "; ".join(issue_messages)
+        raise ValueError(error_message)
     binding = binding_for(directory, manifest)
     if binding["contract"] != expected_contract:
-        raise ValueError(f"Expected {expected_contract}, got {binding['contract']}")
+        raise ValueError(
+            f"Expected {expected_contract}, got {binding['contract']}"
+        )
     if not integrity.review_satisfied(directory, manifest):
         raise ValueError("This input awaits the user-selected human review")
 
@@ -390,10 +432,13 @@ def load_external_artifact(directory: Path, expected_contract: str) -> tuple[obj
     attempt = os.environ.get("SCIENTIFIC_EXECUTION_DIR")
     if attempt:
         from execution import write_json
+
         inputs_dir = Path(attempt) / "input_bindings"
         inputs_dir.mkdir(exist_ok=True)
         identity = binding["manifest_hash"].split(":")[-1]
-        write_json(inputs_dir / (identity + ".json"), {"role": expected_contract, **binding})
+        input_record_path = inputs_dir / (identity + ".json")
+        input_record = {"role": expected_contract, **binding}
+        write_json(input_record_path, input_record)
 
     # 按已核验的字段声明转换 CSV 数值；JSON 保留解析后的类型。
     contract = read_config(directory / "artifact_contract.toml")
@@ -402,11 +447,42 @@ def load_external_artifact(directory: Path, expected_contract: str) -> tuple[obj
     if data["format"] == "json":
         return integrity.load_json(path), binding
     with path.open(newline="", encoding="utf-8") as stream:
-        rows = list(csv.DictReader(stream))
+        reader = csv.DictReader(stream)
+        rows = list(reader)
     for row in rows:
-        for key, kind in data["columns"].items():
-            if kind.startswith("float"):
-                row[key] = float(row[key])
-            elif kind.startswith("int"):
-                row[key] = int(row[key])
+        convert_numeric_columns(row, data["columns"])
     return rows, binding
+
+
+def convert_numeric_columns(row: dict, columns: dict[str, str]) -> None:
+    """按已核验的契约转换一行 CSV 的数值字段。
+
+    参数
+    ----
+    row : dict
+        csv.DictReader 读取的一行，键为列名，转换前的值为字符串。
+
+    columns : dict[str, str]
+        列名到契约类型的映射；float/int 前缀分别表示浮点数和整数。
+        其他列保持原值，顺序沿用契约中的字段顺序。
+
+    返回
+    ----
+    None
+        原地更新 row 的数值字段，不创建另一个行对象。
+
+    处理过程
+    --------
+    1. 遍历声明的列，按类型前缀调用对应的标准数值转换。
+
+    副作用
+    ------
+    只修改 row；不重新核验契约，不读取文件，转换异常自然传播。
+    """
+
+    # 该行由本次读取建立，字段存在性已由外部产物核验保证。
+    for key, kind in columns.items():
+        if kind.startswith("float"):
+            row[key] = float(row[key])
+        elif kind.startswith("int"):
+            row[key] = int(row[key])

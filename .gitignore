@@ -10,3 +10,11 @@ suggestion.md
 # Regenerated example results live in fresh run directories.
 scientific-coding/examples/minimal_pipeline/artifacts/
 scientific-coding/examples/minimal_pipeline/executions/
+scientific-coding/examples/basic_experiment/runs/
+scientific-coding/examples/basic_experiment/executions/
+
+# 本仓库仅发布技能组件，开发测试与评测保留在本地。
+scientific-coding/evals/
+scientific-coding/tests/
+.github/workflows/ci.yml
+.github/workflows/nightly-evals.yml

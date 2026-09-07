@@ -20,7 +20,7 @@ Preserve sample IDs when identity is unchanged. Emit per-ID reasons for exclusio
 
 ## Necessary validation and provenance
 
-Apply [checks.md](checks.md) after the full logical path is written; external origin alone does not justify runtime validation. Keep the actual input/config/version binding for provenance. When the chosen reuse protocol requires exact hash-bound identity, verify that identity once at its owning entry and reuse it while valid. Do not rescan unchanged in-process data. A previous approval is a recorded decision, not evidence about newly read bytes.
+Apply [checks.md](checks.md) after the full logical path is written; external origin alone does not justify runtime validation. Keep the actual input/config/version binding for provenance. When the chosen reuse protocol requires exact hash-bound identity, have the orchestrator invoke the existing I/O verifier once on the actual consumed version and reuse that binding while valid. Stage business functions do not call the verifier. Do not rescan unchanged in-process data. A previous approval is a recorded decision, not evidence about newly read bytes.
 
 Record actual input roles and hashes/versions, effective config (including overrides), code revision or source hash including dirty changes, environment/library versions, and randomness needed to reproduce the computation. Do not substitute placeholder commits or claimed measurements. Distinguish execution inputs (worker count, scheduler, hardware, temporary paths) from scientific choices; never record credentials. Materialize experiment-defining splits or permutations when necessary to preserve their identities across consumers.
 
@@ -32,7 +32,7 @@ Write a complete result to a staging directory on the same filesystem, then publ
 
 Retain requested deliverables at their declared locations after validation. Demonstrate tamper rejection or invalid inputs using a disposable copy separate from the active results directory; do not leave intentionally corrupt examples mixed with completed results or remove the user's deliverables while cleaning up tests.
 
-`scientific_artifact.py finalize <dir>` finalizes a staging directory: validates the declared contract metadata, writes hashes and manifest, and returns without waiting for review. The producer owns data invariants; finalization does not repeat row/schema scans or certify scientific validity. `verify --full` checks supported payload schemas when independently auditing or loading external data. Finalization never creates an approval record by default. Stage I/O owns directory publication; finalization alone is not an atomic whole-directory publish. Use the example's narrow I/O boundary instead of duplicating hash machinery in each stage.
+`scientific_artifact.py finalize <dir>` finalizes a staging directory: validates the declared contract metadata, writes hashes and manifest, and returns without waiting for review. Scientific transformations establish their output by construction; finalization does not repeat row/schema scans or certify scientific validity. `verify --full` checks supported payload schemas when independently auditing or loading external data. Finalization never creates an approval record by default. The orchestrator invokes necessary checks before asking the I/O layer to finalize and publish; finalization alone is not an atomic whole-directory publish. Reuse existing hash/publication machinery, but do not copy legacy stage-local checks or publish-before-check ordering from the integrated example.
 
 ## Optional human review
 

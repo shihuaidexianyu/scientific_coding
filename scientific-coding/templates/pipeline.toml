@@ -1,56 +1,49 @@
-# 此科学分支的名称，不采用配置继承。
-name = "raw_main_analysis"
+# 单次实验的统一参数模板，使用时按实验目的重命名为 amplitude_comparison.toml。
+# 与实验 MD、专属编排 Python 放在 experiments/amplitude_comparison/ 中。
+# 相对路径均以这份 TOML 所在目录为基准，编排器读取、解析并分发参数。
+# 阶段顺序和方法分支写在编排代码中，不在此指定脚本或其他配置文件。
 
-# 新运行目录的父位置，相对项目根目录。
-run_root = "runs/raw_main_analysis"
+# 实验标识，用于关联设计说明、运行记录和结果。
+[experiment]
 
-# 阶段声明表达执行关系，科学计算由各阶段脚本负责。
-[[stage]]
+# 名称不作为动态选择科学实现的开关。
+name = "amplitude_comparison"
 
-# 此阶段实现的科学过程名称。
-name = "preprocess_raw"
+# 实际输入位置及科学角色。
+[input]
 
-# 相对项目根目录的 Python 源文件路径。
-script = "stages/preprocess_raw.py"
+# UTF-8 试次表，含 trial_id、condition、amplitude_uv 列。
+trials_path = "../../data/trials.csv"
 
-# 带说明的科学参数文件。
-config = "configs/preprocess_raw.toml"
+# 输出位置；每次尝试由编排器在此目录下创建新编号。
+[output]
 
-# 声明输出契约；对应结果须附读取说明。
-output_contract = "ProcessedDataset@1"
+# 科学结果的父目录，不覆盖已有运行。
+run_root = "../../runs/amplitude_comparison"
 
-# 每个输入均声明科学角色及确切契约版本。
-[[stage.inputs]]
+# 日志与尝试记录的父目录，保存成功和失败运行。
+execution_root = "../../executions/amplitude_comparison"
 
-# 阶段用于引用此数据集的角色名。
-role = "raw_signal"
+# 筛选步骤的科学参数，具体依据写在实验 MD 中。
+[preprocess]
 
-# 输入的数据接口，不是对生产者源文件的导入。
-contract = "RawDataset@1"
+# 振幅下限，单位微伏；严格小于时排除，等于时保留。
+amplitude_floor_uv = 0.2
 
-# 确切输入位置，避免可变的 latest 别名。
-path = "artifacts/raw_dataset/run_001"
+# 组内 bootstrap 参数，由编排明确传入估计函数。
+[analysis]
 
-# 可选配套输入，用于演示多输入关联。
-[[stage.inputs]]
+# 重采样重复次数 B，不是独立样本量。
+n_bootstrap = 2000
 
-# 要关联到信号试次的行为注释。
-role = "behavior"
+# 中心区间概率；示意取值不代表对具体研究的统计建议。
+confidence_level = 0.95
 
-# 配套表自身的数据契约。
-contract = "BehaviorTable@1"
+# 局部随机数种子，运行记录保留实际使用值。
+seed = 20260907
 
-# 确切的配套产物位置。
-path = "artifacts/behavior/run_001"
+# 运行资源参数，不改变科学方法。
+[runtime]
 
-# 每次数据关联都需解释连接键及对应数量关系。
-join_keys = ["sample_id"]
-
-# 每个原始试次恰好匹配一条注释记录。
-cardinality = "one_to_one"
-
-# 明确处理未匹配项，不静默丢弃试次。
-missing_matches = "error"
-
-# 保留原始试次顺序，供下游对齐。
-output_order = "raw_signal_order"
+# worker 数量；并行时保持声明的随机与汇总顺序。
+workers = 1

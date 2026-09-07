@@ -9,13 +9,13 @@
 
 文件流程
 --------
-data/trials.csv（调用方读取）
+../../data/trials.csv（编排读取）
             |
             v
   amplitudes_uv（内存列表）
             |
-            +<-- configs/preprocess.toml
-            |    amplitude_floor_uv（调用方传入）
+            +<-- amplitude_comparison.toml
+            |    preprocess.amplitude_floor_uv（编排传入）
             v
        按振幅下限筛选
             |
@@ -31,15 +31,16 @@ data/trials.csv（调用方读取）
 
 输入文件与数据
 --------------
-调用方读取 UTF-8 CSV 文件 data/trials.csv 的 amplitude_uv 列，
+编排读取 UTF-8 CSV 文件 ../../data/trials.csv 的 amplitude_uv 列，
 在入口将其转换为浮点数列表，再传给本文件中的函数。
 本方法假设数值有限；转换本身不证明这一假设已验证。
 每个元素代表一个试次，单位为微伏；保持 CSV 原始行顺序。
 
 关联配置
 --------
-调用方读取 configs/preprocess.toml 的 amplitude_floor_uv 键，
-把有限的数值阈值作为 floor_uv 传入。两个路径均相对项目根目录。
+编排读取同目录 amplitude_comparison.toml 的 preprocess.amplitude_floor_uv，
+把有限的数值阈值作为 floor_uv 传入。本业务文件不读取 TOML。
+CSV 相对路径以该 TOML 所在目录为基准，由编排解析后读取。
 
 加工逻辑
 --------
@@ -99,8 +100,11 @@ def summarize_amplitudes(
     没有保留样本时，mean 自然抛出 StatisticsError，不另加同义检查。
     """
 
-    # 按阈值筛选，列表推导保留原有相对顺序和数值单位。
-    retained = [value for value in amplitudes_uv if value >= floor_uv]
+    # 按阈值筛选，显式循环保留原有相对顺序和数值单位。
+    retained = []
+    for value in amplitudes_uv:
+        if value >= floor_uv:
+            retained.append(value)
 
     # 对保留试次汇总数量和算术均值，并分别返回列表与汇总字典。
     retained_count = len(retained)

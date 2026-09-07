@@ -1,89 +1,70 @@
 ---
 name: scientific-coding
-description: Create, modify, audit, and optimize readable scientific pipelines with Chinese explanations, explicit data and configuration, and traceable results. Use for study preprocessing, analysis, inference and scientific views; do not impose pipeline architecture on reusable libraries, SDKs or infrastructure.
+description: 编写和修改易读、准确、可追溯的科研实验代码，适用于实验编排、预处理、分析和结果展示。采用中文说明、实验专属编排及统一参数；不把科研流水线结构强加给通用库或 SDK。
 ---
 
-# Scientific Coding
+# 科研代码：方法清楚，执行可追溯
 
-## Purpose and scope
+面向掌握变量、赋值、函数、简单条件和循环的 Python 初学者写代码。
+优先科学准确性和可读性，不为节省 token、行数或字符压缩步骤。
+沿用用户已确定的方法和项目约定；新实验使用下面的结构，旧项目仅在任务
+包含迁移时调整。保留用户编辑与历史结果，不把假设或估算描述成已验证事实。
 
-Make the scientific method locally understandable in executable code. Prioritize scientific correctness and human readability, then reproducibility and research iteration time. Work within the user's existing project and decisions; do not migrate configuration or scaffold an artifact framework merely because this skill is active.
+## 交付应当是什么样
 
-Never trade code readability or explanatory completeness for fewer output tokens, lines or characters. Spend the tokens needed for explicit named intermediates, separate logical steps and Chinese documentation. Do not compress work into syntactic sugar, chained calls, lambdas, assignment expressions or short-circuit expressions merely to shorten output. A construct is acceptable only when the operation remains easier to understand and the readability rules below still hold. Reducing repeated skill instructions does not relax the generated-code requirements.
+1. **一个实验一个目录。** 同目录放实验设计 MD、实验命名的单一 TOML、
+   专属编排 Python；业务实现放独立 stages/。MD 解释目的、设计和依据，
+   TOML 保存参数，编排写实际顺序和分支。允许少量清楚的调用重复。
+2. **配置由编排管理。** 读取一次 TOML，按该文件所在目录解析配置内相对
+   路径，将具名参数或明确的阶段子集传给 stage；stage 不读取或接收总配置。
+3. **业务表达科学方法。** stage 保留筛选、变换和估计；必要检查由实际编排
+   在相关调用前后执行，检查实际新数据后才进入依赖计算或正式发布。
+   原生读取/数值错误自然传播，不在 stage 或其辅助函数隐藏验证。
+4. **先完成逻辑，再论证检查。** 初稿不预装防御、兜底或门控。完整后只保留
+   有可信触发场景、实际后果且原生错误不能解决的必要检查；未知概率不等于
+   必须防御。同流程仍有效的保证不重复检查，不为偶发内存错误假设增加扫描。
+5. **每步能顺序读懂。** 使用具名中间变量、简单赋值、显式 if/elif/else 和
+   for；一个循环完成一项清楚操作。默认展开压缩写法，保留清楚的标准科学
+   API。推导最多一个 for 和一个简单条件；显式循环内最多一个简单判断，
+   更深结构拆成顺序步骤或具名科学函数。参数中的加工/构造先命名再传递。
+6. **中文说明与代码贴近。** 文件头有用途、实际输入/输出、关联 TOML 和
+   字符流程图；函数用真实 docstring 支持调用处悬停，分段解释参数结构、
+   返回结构、逻辑和副作用。代码及 TOML 按语义块注释，块前空一行。
+   源码、注释、docstring、TOML 每行至多 80 个 Unicode 字符。
+7. **科学依据可核对。** 明确样本单位、分组/对齐、筛选依据、随机与重采样
+   设计及推断边界；保留样本 ID、逐 ID 排除原因和实际拆分/聚合映射。
+   记录初始数据和每步中间数据的格式、字段/轴、单位与具体读取方式。
+8. **运行留下完整证据。** 正常与失败尝试保留实际输入/配置/代码/环境来源、
+   完整 stdout/stderr/堆栈、状态/退出码、起止时间、阶段耗时和可获取资源。
+   一个外层记录足够，批量索引关联所有尝试；新运行不覆盖旧结果。
+   交付中文工作量、时间/内存与耗时估计，区分实测、外推和未知。
 
-Complete the requested outcome. Stage boundaries do not require human approval. Pause only for an unresolved material scientific decision or a review point explicitly selected by the user. Preserve earlier results and manual edits.
+阶段之间默认自动继续。只在用户指定审核点或未确定的实质科学决定处暂停。
+不要生成通用 pipeline 引擎、检查注册表、审批系统或逐层记录包装。
 
-## Write logic first; justify checks afterwards
+## 完成工作的顺序
 
-The first draft contains only the original scientific/business logic: read, transform, compute and produce output. Do not preinstall assertions, defensive validation, preflights, fallback/repair branches or approval gates, including dormant validation scaffolding. Method-defining selection and branching remain part of the algorithm; normal reader/library exceptions propagate.
+实现原始逻辑 → 简化并安排必要检查 → 补全中文说明 → 格式修正 → 验证。
+这些是作者职责，不是运行阶段或五次审批；小修改只做相关部分。
+agent 编写并运行适合本任务语言的小脚本，落实注释空行和 80 字符，
+保护字符串与语法含义；按 [readability.md](references/readability.md) 验证它。
+最后沿实际数据阅读代码并运行相关科学/边界测试；格式成功不证明方法正确。
+较大任务在环境支持且允许时由独立只读 agent 核验实际文件，发现问题局部修正。
 
-After the complete logical path exists, consider a runtime check only if a concrete, credible failure in this project makes it necessary. Establish the trigger and its likelihood evidence, the consequence, what upstream construction/contracts already exclude, why ordinary API errors or authoring-time tests are insufficient, and whether effective detection justifies the reading/runtime/maintenance cost. Unknown probability is not permission to add a check; do not invent percentages. Hypothetical rare memory corruption is not a reason for defensive pipeline code.
+用户中途提问时先回答再继续；明确暂停才停。编辑前重读受影响文件，保留
+手动修改，只重做依赖变化的验证；无法确定的实质冲突才询问。
+上下文不足时按完整语义单元续接，不能压缩剩余实现或宣称未完工作已完成。
 
-Reuse guarantees while valid. An external file, a helper call or an undocumented possibility does not automatically justify validation. Retain only justified checks at their owning boundary; do not generate check registries, proof logs or approval forms. For existing code, assess actual checks before removing them; the draft rule does not authorize breaking established behavior blindly. The decision policy and examples live in [checks.md](references/checks.md).
+## 按当前任务读取
 
-Authoring review/tests and recording actual execution are distinct from runtime validation. The first draft is a writing phase, not permission to publish unverified results. Add the required execution recording at the outer boundary before the delivered program runs; keep it out of numerical logic.
+- 实验组织、配置分发与检查归属：[experiment.md](references/experiment.md)。
+- 代码写法、中文文档与格式：[readability.md](references/readability.md)。
+- 实际运行记录、批量与成本交付：[execution.md](references/execution.md)。
+- 需要查看完整小实验时：[基础示例](examples/basic_experiment/README.md)。
 
-## Readable code and explanations
+不逐项打开所有文档。高级产物协议、人工审批工具、性能优化和断点恢复
+只在任务明确需要时查 [扩展目录](references/extensions.md)，不纳入默认编排。
+本地开发测试、评测和历史报告不随技能发布，也不是科研代码任务的阅读材料。
 
-- All explanatory comments, file/function documentation, TOML descriptions and data guides are Chinese; keep API identifiers intact.
-- Each edited/generated source file has an accurate purpose, actual inputs/outputs, associated configuration and a character flow diagram. Python module opening quotes occupy their own line.
-- Every function has hover-visible documentation in this order: purpose, 参数, 返回, 处理过程, 副作用. Names/types are separate from indented explanations; separate parameters/returns with blank lines and describe fields, axes and units locally.
-- Explain meaningful operations next to their code, one comment per semantic block rather than per punctuation line. Put a blank before each comment block, including after docstrings, and keep its code immediately after it. Explain associated TOML sections and keys.
-- Source/config lines, including comments/docstrings, are at most 80 characters. Use one comprehension layer and one `for` with at most one simple filter; expand additional nesting. Keep explicit control flow shallow.
-- Name intermediate filtering, mapping, aggregation and constructed data before passing it as an argument. Use explicit branches for multi-step fallback and mixed conditional selection; preserve evaluation order, false-valued data and iterator laziness.
-- One loop has one purpose. Separate collecting, determining reasons and constructing output into named steps without trivial wrappers or generic frameworks.
-- Inventory initial data and describe each stage result: location/format, fields/axes, types/units, identity/alignment, actual reading method and changes from inputs. Explain important in-memory intermediates locally.
-
-Use [readability.md](references/readability.md) for exact rules and [stage_header.md](templates/stage_header.md) for the single maintained function/header layout. Correct explanations to match intended behavior; do not change science just to make an inaccurate comment true.
-
-## Scientific and execution boundaries
-
-- Keep coherent scientific operations visible and ordered. Formal stages exchange described data, not imports of other stages' implementation. Create persisted boundaries only when retention, reuse or restart warrants them.
-- Keep materially different methods visible in sibling implementations. Preserve IDs and record actual exclusions, splits, joins and aggregations. Choose statistical units and resampling from the study design.
-- Use self-contained annotated TOML for new scientific configuration; preserve an existing format. Runtime options must not silently change the method.
-- Views normally present retained calculations. Respect a requested combined-file layout while making analysis and rendering distinct.
-- Every runnable scientific entry point retains actual provenance, full stdout/stderr/tracebacks, UTC lifecycle, real status/exit code, stage times and available CPU/RAM/VRAM with measurement scope. One outer attempt record suffices; batch indexes link all attempts, including failures and retries. Preserve old results and failed diagnostics; reuse existing infrastructure.
-- After scientific code or computational configuration changes, give a Chinese workload/time/memory estimate with hardware/workers, bottlenecks and evidence. Distinguish measurements, extrapolation and unknowns. Do not invent runtime numbers or automatically start optimization.
-
-## Authoring workflow
-
-1. **Implement:** complete the original logical path, without defensive checks. Keep essential scientific intent beside the computation.
-2. **Simplify and decide:** remove needless indirection, simplify expressions/loops, and apply the check-necessity policy to actual candidates. No default quota of checks.
-3. **Explain:** complete accurate Chinese code, interface, data and associated configuration descriptions against the current source.
-4. **Format:** write and run a task-specific, language-aware script for comment spacing and the 80-character limit. Verify string/parse meaning is preserved and obtain a clean final check.
-5. **Verify:** review final code and explanations together; run checks relevant to the change. For complete plans or substantial multi-function work, use a permitted independent read-only agent when available. Fix concrete findings through only the affected passes, then verify the changed result.
-
-These are authoring responsibilities, not five approvals or runtime stages. Small changes need only applicable work. Do not repeat successful checks without a new change, failure or unresolved concern. Details and intervention handling: [workflow.md](references/workflow.md).
-
-When the user intervenes, answer promptly and continue unless they pause or replace the task. Reread affected files before editing, preserve manual changes, and invalidate only evidence dependent on changed code/config. Ask only about material unresolved conflicts; no new state machine or mandatory working log.
-
-## Load only what the task needs
-
-Do not open every reference or copy all templates/examples. The entrypoint supplies shared constraints; load a reference only when making the decision it covers. Previously read, unchanged instructions need not be reread every pass.
-
-| Current decision | Reference |
-|---|---|
-| Add/remove/retain runtime checks | [checks.md](references/checks.md) |
-| Write explanations, format, simplify expressions | [readability.md](references/readability.md) |
-| Create/change a stage or scientific branch | [stage.md](references/stage.md) |
-| Define data boundaries, lineage or retained artifacts | [artifact.md](references/artifact.md) |
-| Design inference, splits or resampling | [statistical_validity.md](references/statistical_validity.md) |
-| Build scientific views | [view.md](references/view.md) |
-| Add/change runnable entry points and records | [execution.md](references/execution.md) |
-| Give an ordinary cost estimate | [estimation.md](references/estimation.md) |
-| Actually optimize performance | [optimization.md](references/optimization.md) |
-| Decide/implement resumability | [resumability.md](references/resumability.md) |
-| Perform a substantive final or requested audit | [audit.md](references/audit.md) |
-| Interpret linter findings or configure its scope | [lint.md](references/lint.md) |
-
-The integrated [example](examples/minimal_pipeline/README.md) demonstrates optional artifact/review/resume facilities together; it is not a default scaffold. Use only needed parts.
-
-## Verification and delivery
-
-Run the relevant changed-code linter where applicable:
-
-    python <skill-dir>/scripts/scientific_code_lint.py <project-root> --changed-only
-
-For a whole-project audit omit `--changed-only`; for committed changes use `--base-ref`. Fix errors and assess heuristic warnings from actual evidence. This linter does not enforce the new expression/80-character/comment-spacing rules or prove scientific/documentation truth; use the task script and semantic review. Keep authoring tools outside the runtime pipeline.
-
-Lead delivery with the outcome, actual validation and limits. Report material method/data/population/randomness changes when applicable, the formatter's coverage and final result, actual log/record/index locations for runnable work, and the Chinese cost estimate. A zero exit code does not mean statistical significance. Explain a non-obvious retained check briefly when useful; do not attach a mandatory check ledger or approval form.
+交付说明实际完成内容、验证、日志/结果位置、成本和剩余限制。
+不以工具零退出、注释数量或模型自评证明全面达标，不伪造概率、测量或结论。
